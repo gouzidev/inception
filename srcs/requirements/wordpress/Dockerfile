@@ -12,8 +12,8 @@ RUN apt install -y \
     php-gd \
     php-mbstring \
     php-xml \
-    php-zip
-
+    php-zip \
+    mariadb-client  # Add this line to install the MySQL/MariaDB client tools
 
 RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
 

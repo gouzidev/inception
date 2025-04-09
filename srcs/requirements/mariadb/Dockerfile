@@ -13,7 +13,7 @@ RUN mkdir -p /var/run/mysqld \
 RUN sed -i 's/bind-address.*/bind-address = 0.0.0.0/' /etc/mysql/mariadb.conf.d/50-server.cnf
 
 # Copy initialization script
-COPY init.sql /tmp/init.sql
+COPY tools/init.sql /tmp/init.sql
 
 # Ensure correct permissions for init script
 RUN chmod 644 /tmp/init.sql \
@@ -23,7 +23,7 @@ RUN chmod 644 /tmp/init.sql \
 EXPOSE 3306
 
 # Use an entrypoint script to ensure initialization
-COPY entrypoint.sh /entrypoint.sh
+COPY tools/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
