@@ -1,5 +1,4 @@
 all:
-	sudo cp srcs/requirements/nginx/tools/hosts /etc/hosts
 	cd srcs && sudo docker compose up --build
 up : all
 

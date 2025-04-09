@@ -29,9 +29,9 @@ done
 # Run initialization script
 echo "Running initialization script..."
 
-mysql -e "CREATE DATABASE IF NOT EXISTS ${DB_NAME};"
-mysql -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'%' IDENTIFIED BY '${DB_PASSWORD}';"
-mysql -e "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'%';"
+mysql -e "CREATE DATABASE IF NOT EXISTS ${MYSQL_DB_NAME};"
+mysql -e "CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';"
+mysql -e "GRANT ALL PRIVILEGES ON ${MYSQL_DB_NAME}.* TO '${MYSQL_USER}'@'%';"
 mysql -e "FLUSH PRIVILEGES;"
 
 # Shutdown temporary server
