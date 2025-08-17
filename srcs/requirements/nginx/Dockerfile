@@ -1,27 +1,32 @@
-FROM debian:bullseye
+from alpine:3.21
 
-RUN apt update -y
-RUN apt upgrade -y
-RUN apt install -y \
-    nginx \
-    openssl \
-    curl \
-    php-fpm
 
-RUN mkdir /etc/nginx/ssl
+# tools first (alpine is minimal)
+run apk add --no-cache openssl zsh curl bash
 
-RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+
+#install nginx
+run apk add --no-cache nginx
+
+
+# setup certificate
+run mkdir -p /etc/nginx/ssl
+
+run openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
     -keyout /etc/nginx/ssl/nginx.key \
     -out /etc/nginx/ssl/nginx.crt \
-    -subj "/C=MA/ST=Sale/L=Sale/O=1337/CN=localhost"
+    -subj "/C=US/ST=State/L=City/O=Organization/CN=sgouzi.42.fr" \
+    -addext "subjectAltName=DNS:sgouzi.42.fr,DNS:localhost,IP:127.0.0.1"
 
-# Ensure www directory exists and has correct permissions
-RUN mkdir -p /var/www/html
-RUN chown -R www-data:www-data /var/www/html
-RUN chmod -R 755 /var/www/html
+run chmod 600 /etc/nginx/ssl/nginx.key
 
-COPY conf/nginx.conf /etc/nginx/nginx.conf
+run chmod 644 /etc/nginx/ssl/nginx.crt
 
-EXPOSE 443
 
-CMD ["nginx", "-g", "daemon off;"]
+
+copy tools/conf.conf /etc/nginx/nginx.conf
+# copy the config file from host to the container for nginx to use it
+
+
+# run it as entry point (exec mode)
+entrypoint ["nginx", "-g", "daemon off;"]

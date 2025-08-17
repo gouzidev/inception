@@ -1,40 +1,24 @@
-FROM debian:12
+from alpine:3.21
 
-RUN apt update -y
-RUN apt upgrade -y
-RUN apt install -y \
-    wget \
-    tar \
-    curl \
-    php-fpm \
-    php-mysql \
-    php-curl \
-    php-gd \
-    php-mbstring \
-    php-xml \
-    php-zip \
-    mariadb-client  # Add this line to install the MySQL/MariaDB client tools
-
-RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-
-RUN chmod 777 ./wp-cli.phar
-
-RUN mkdir -p /var/www/html
-
-RUN chown -R www-data:www-data /var/www/html
-
-RUN mv ./wp-cli.phar /usr/bin/wp
-
-# Configure PHP-FPM
-RUN sed -i 's/listen = \/run\/php\/php8.2-fpm.sock/listen = 9000/' /etc/php/8.2/fpm/pool.d/www.conf
+# tools first (alpine is minimal)
+run apk add --no-cache wget tar  curl zsh
 
 
-COPY tools/script.sh /tmp/script.sh
 
-RUN chmod 777 /tmp/script.sh
+#installing php and php-fpm
+run apk add --no-cache php php-fpm php-mysqli php-pdo php-pdo_mysql php-json php-curl php-gd php-zip php-xml php-mbstring php-session php-fileinfo php-tokenizer 
 
-WORKDIR /var/www/html
+run apk add --no-cache mariadb-client
 
-EXPOSE 9000
 
-ENTRYPOINT ["/tmp/script.sh"]
+# Configure php-fpm to listen on port 9000
+copy conf/php-fpm.conf /etc/php83/php-fpm.d/www.conf
+
+
+copy conf/wp-config.php /tmp/wp-config.php
+
+
+copy tools/start.sh ./script.sh
+
+# this will run it not as shell (exec mode not shell mode) so it will get pid 1
+entrypoint ./script.sh

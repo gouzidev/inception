@@ -1,46 +1,48 @@
 services:
-    nginx:
-      build: ./requirements/nginx
-      volumes:
-        - wordpress-data:/var/www/html
-        - ./requirements/nginx/conf/nginx.conf:/etc/nginx/nginx.conf
-      networks:
-        - docker-network
-      ports:
-        - 443:443
-      depends_on:
-        - wordpress
-      extra_hosts:
-        - "${DOMAIN_NAME}:127.0.0.1"
     wordpress:
-      build: ./requirements/wordpress
-      volumes:
-        - wordpress-data:/var/www/html
-      networks:
-        - docker-network
-      environment:
-        - MYSQL_DB_HOST=${MYSQL_DB_HOST}
-        - MYSQL_USER=${MYSQL_USER}
-        - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-        - MYSQL_DB_NAME=${MYSQL_DB_NAME}
-      depends_on:
-        - mariadb
+        build: ./requirements/wordpress
+        env_file:
+            - "./requirements/wordpress/conf/.env"
+        volumes:
+            - /home/sgouzi/data:/var/data/www
+        networks:
+            - docker-network
+        dns:
+            - 8.8.8.8
+            - 1.1.1.1
+        expose:
+            - 9000
+        restart: always
+        depends_on:
+            - mariadb
+
+    nginx:
+        build: ./requirements/nginx
+        volumes:
+            - /home/sgouzi/data:/var/data/www
+        networks:
+            - docker-network
+        ports:
+            - 443:443
+        restart: always
+
 
     mariadb:
-      build: ./requirements/mariadb
-      volumes:
-        - mariadb-data:/var/lib/mysql
-      environment:
-        - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
-        - MYSQL_DB_NAME=${MYSQL_DB_NAME}
-        - MYSQL_USER=${MYSQL_USER}
-        - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-      networks:
-        - docker-network
-volumes:
-  wordpress-data:
-  mariadb-data:
+        build: ./requirements/mariadb
+        volumes:
+            - /home/sgouzi/data/mariadb:/var/lib/mysql
+        expose:
+            - 3306
+        env_file:
+            - "./requirements/mariadb/conf/.env"
+        networks:
+            - docker-network
+        restart: always
+
+
+
 
 networks:
-  docker-network:
-    name: docker-network
+    docker-network: {}
+volumes:
+    wordpress-data: {}

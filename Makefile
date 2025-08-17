@@ -1,24 +1,30 @@
 all:
-	cd srcs && sudo docker compose up --build
-up : all
+	cd srcs && docker compose up
 
-setup:
-	sudo rm -f /etc/apt/sources.list.d/*docker*.list
-	sudo apt clean
-	sudo apt update -y
-	sudo apt install curl -y
-	sudo apt install software-properties-common apt-transport-https ca-certificates -y
-	curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-	echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu oracular stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-	sudo apt update -y
-	sudo apt install docker-ce docker-ce-cli containerd.io uidmap -y
 
-down: clean
+up:
+	cd srcs && docker compose up
 
-clean:
-	cd srcs && sudo docker compose down
+up_strong:
+	cd srcs && docker compose up --build
 
-fclean:
-	cd srcs && sudo docker compose down && sudo docker system prune -f
 
-re: clean all
+
+down:
+	cd srcs && docker compose down
+
+down_bad:
+	cd srcs && docker compose down --volumes
+	cd srcs && docker image rm -f srcs-nginx:latest 
+	cd srcs && docker image rm -f srcs-wordpress:latest 
+	cd srcs && docker image rm -f srcs-mariadb:latest 
+	sudo rm -rf /home/$(USER)/data/nginx/*
+	sudo rm -rf /home/$(USER)/data/mariadb/*
+	sudo rm -rf /home/$(USER)/data/wordpress/*
+
+
+re:
+	cd srcs && docker compose down && docker compose up
+
+hard_reset: down_bad up_strong
+	echo "Hard reset done ..."
