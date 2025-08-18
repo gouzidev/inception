@@ -1,1613 +1,0 @@
-=== ./srcs/requirements/tools/add-host.sh ===
-
-
-#!/bin/sh
-
-HOST_ENTRY="127.0.0.1 $(DOMAIN)"
-
-# Check if line already exists in /etc/hosts
-if ! grep -qF "$HOST_ENTRY" /etc/hosts; then
-    echo "$HOST_ENTRY" | sudo tee -a /etc/hosts > /dev/null
-fi
-=== ./srcs/requirements/wordpress/conf/wp-config.php ===
-
-
-<?php
-// tools/wp-config.php
-/** The name of the database for WordPress */
-define( 'DB_USER', getenv('WORDPRESS_DB_USER'));
-define( 'DB_NAME', getenv('WORDPRESS_DB_NAME'));
-define( 'DB_PASSWORD', getenv('WORDPRESS_DB_PASSWORD'));
-define( 'DB_HOST', getenv('WORDPRESS_DB_HOST'));
-define( 'DB_CHARSET', 'utf8mb4' );
-define( 'DB_COLLATE', '' );
-
-define('WP_ALLOW_REPAIR', true);
-
-/** WordPress unique keys and salts */
-define('AUTH_KEY',         'your-unique-auth-key-here');
-define('SECURE_AUTH_KEY',  'your-unique-secure-auth-key-here');
-define('LOGGED_IN_KEY',    'your-unique-logged-in-key-here');
-define('NONCE_KEY',        'your-unique-nonce-key-here');
-define('AUTH_SALT',        'your-unique-auth-salt-here');
-define('SECURE_AUTH_SALT', 'your-unique-secure-auth-salt-here');
-define('LOGGED_IN_SALT',   'your-unique-logged-in-salt-here');
-define('NONCE_SALT',       'your-unique-nonce-salt-here');
-
-/** WordPress database table prefix */
-$table_prefix = 'wp_';
-
-/** WordPress debugging mode */
-define( 'WP_DEBUG', false );
-
-/* That's all, stop editing! */
-if ( ! defined( 'ABSPATH' ) ) {
-    define( 'ABSPATH', __DIR__ . '/' );
-}
-
-require_once ABSPATH . 'wp-settings.php';
-=== ./srcs/requirements/wordpress/conf/php-fpm.conf ===
-
-
-[www]
-user = nobody
-group = nobody
-listen = 0.0.0.0:9000
-pm = dynamic
-pm.max_children = 5
-pm.start_servers = 2
-pm.min_spare_servers = 1
-pm.max_spare_servers = 3
-pm.max_requests = 500
-
-; Security
-php_admin_value[disable_functions] = exec,passthru,shell_exec,system
-php_admin_flag[allow_url_fopen] = off
-
-
-; for some reason, php fpm doesnt pass my env variables to php scripts, so here im teaching him
-clear_env = no
-env[WORDPRESS_DB_HOST] = $WORDPRESS_DB_HOST
-env[WORDPRESS_DB_NAME] = $WORDPRESS_DB_NAME
-env[WORDPRESS_DB_USER] = $WORDPRESS_DB_USER
-env[WORDPRESS_DB_PASSWORD] = $WORDPRESS_DB_PASSWORD
-env[WORDPRESS_TABLE_PREFIX] = $WORDPRESS_TABLE_PREFIX
-
-; Performance
-php_value[memory_limit] = 128M
-php_value[max_execution_time] = 30
-=== ./srcs/requirements/wordpress/conf/.env ===
-
-
-WORDPRESS_DB_NAME=inception
-
-WORDPRESS_DB_HOST=mariadb:3306
-
-MYSQL_ROOT_PASSWORD=sgouzi
-
-WORDPRESS_DB_USER=salah
-WORDPRESS_DB_PASSWORD=salah
-
-WORDPRESS_TABLE_PREFIX=wp_
-=== ./srcs/requirements/wordpress/tools/start.sh ===
-
-
-mkdir -p /var/data/www
-
-# installing wordpress to its right path
-wget https://wordpress.org/latest.tar.gz -O /tmp/wordpress.tar.gz \
-  && tar -xzf /tmp/wordpress.tar.gz -C /var/data/www/ \
-  && rm /tmp/wordpress.tar.gz
-
-cp /tmp/wp-config.php /var/data/www/wordpress/wp-config.php
-
-rm /tmp/wp-config.php
-
-chown -R nobody:nobody /var/data/www/wordpress
-
-
-echo "starting php-fpm..."
-
-exec php-fpm83 -F
-=== ./srcs/requirements/wordpress/Dockerfile ===
-
-
-FROM alpine:3.21.4
-
-# tools first (alpine is minimal)
-RUN apk add --no-cache wget tar  curl zsh
-
-
-
-#installing php and php-fpm
-RUN apk add --no-cache php php-fpm php-mysqli php-pdo php-pdo_mysql php-json php-curl php-gd php-zip php-xml php-mbstring php-session php-fileinfo php-tokenizer 
-
-RUN apk add --no-cache mariadb-client
-
-
-# Configure php-fpm to listen on port 9000
-COPY conf/php-fpm.conf /etc/php83/php-fpm.d/www.conf
-
-
-COPY conf/wp-config.php /tmp/wp-config.php
-
-
-COPY tools/start.sh ./script.sh
-
-# this will RUN it not as shell (exec mode not shell mode) so it will get pid 1
-ENTRYPOINT ./script.sh
-=== ./srcs/requirements/nginx/conf/conf.conf ===
-
-
-
-worker_processes auto;
-
-error_log /var/log/nginx/error.log debug;
-
-include /etc/nginx/conf.d/*.conf;
-
-events
-{
-        # The maximum number of simultaneous connections that can be opened by
-        # a worker process.
-        worker_connections 1024;
-}
-
-
-http
-{
-    include /etc/nginx/mime.types;
-    sendfile on;
-    server
-    {
-        listen 443 ssl;
-        listen [::]:443 ssl;
-        server_name sgouzi.42.fr;
-        root /var/data/www/wordpress;
-        index index.php index.html index.htm;
-
-        ssl_certificate /etc/nginx/ssl/nginx.crt;
-        ssl_certificate_key /etc/nginx/ssl/nginx.key;
-
-        ssl_protocols TLSv1.2 TLSv1.3;
-
-        location /
-        {
-            try_files $uri $uri/ /index.php?$args;
-        }
-
-
-        location ~ \.php$ {
-            try_files $uri =404;
-            fastcgi_split_path_info ^(.+\.php)(/.+)$;
-            fastcgi_pass wordpress:9000;
-            fastcgi_index index.php;
-            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-            include fastcgi_params;
-        }
-
-    }
-}
-=== ./srcs/requirements/nginx/conf/hosts ===
-
-
-127.0.0.1       localhost
-127.0.0.1       sgouzi.42.fr
-=== ./srcs/requirements/nginx/Dockerfile ===
-
-
-FROM alpine:3.21.4
-
-
-# tools first (alpine is minimal)
-RUN apk add --no-cache openssl zsh curl bash
-
-
-#install nginx
-RUN apk add --no-cache nginx
-
-
-
-# setup certificate
-RUN mkdir -p /etc/nginx/ssl
-
-RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -keyout /etc/nginx/ssl/nginx.key \
-    -out /etc/nginx/ssl/nginx.crt \
-    -subj "/C=US/ST=State/L=City/O=Organization/CN=sgouzi.42.fr" \
-    -addext "subjectAltName=DNS:sgouzi.42.fr,DNS:localhost,IP:127.0.0.1"
-
-RUN chmod 600 /etc/nginx/ssl/nginx.key
-
-RUN chmod 644 /etc/nginx/ssl/nginx.crt
-
-
-
-COPY conf/conf.conf /etc/nginx/nginx.conf
-# COPY the config file FROM host to the container for nginx to use it
-
-RUN echo "starting nginx..."
-
-# RUN it as entry point (exec mode)
-ENTRYPOINT ["nginx", "-g", "daemon off;"]
-=== ./srcs/requirements/mariadb/conf/db.cnf ===
-
-
-# tools/my.cnf
-[mysqld]
-user = mysql
-datadir = /var/lib/mysql
-socket = /run/mysqld/mysqld.sock
-bind-address = 0.0.0.0
-port = 3306
-character-set-server = utf8mb4
-collation-server = utf8mb4_unicode_ci
-skip-name-resolve
-
-[client]
-socket = /run/mysqld/mysqld.sock
-=== ./srcs/requirements/mariadb/conf/.env ===
-
-
-
-MARIADB_DATABASE=inception
-
-MARIADB_ADMIN_USERNAME=sgouzi
-MARIADB_ADMIN_PASSWORD=sgouzi
-
-MARIADB_USER_USERNAME=salah
-MARIADB_USER_PASSWORD=salah
-
-
-
-
-
-=== ./srcs/requirements/mariadb/tools/init.sh ===
-
-
-#!/bin/sh
-# tools/init.sh
-
-set -e  # Exit if any command fails
-
-# Get environment variables (with defaults)
-MARIADB_ADMIN_PASSWORD="${MARIADB_ADMIN_PASSWORD}"
-MARIADB_DATABASE="${MARIADB_DATABASE}"
-
-MARIADB_USER_USERNAME="${MARIADB_USER_USERNAME}"
-MARIADB_USER_PASSWORD="${MARIADB_USER_PASSWORD}"
-
-DATADIR="/var/lib/mysql"
-SOCKET="/run/mysqld/mysqld.sock"
-
-echo "ğŸ”§ MariaDB: Starting initialization..."
-
-
-# Ensure proper ownership
-chown -R mysql:mysql /var/lib/mysql /run/mysqld
-
-# Check if this is the first run
-if [ ! -d "$DATADIR/mysql" ]; then
-    echo "ğŸ—ï¸ MariaDB: First RUN detected, initializing database..."
-    
-    # Initialize the database system
-    # This creates the mysql, performance_schema, etc. databases
-    mariadb-install-db \
-        --user=mysql \
-        --datadir="$DATADIR" \
-        --skip-test-db
-    
-    echo "ğŸš€ MariaDB: Starting temporary server for setup..."
-    
-    # Start MariaDB temporarily (socket only, no network)
-    mysqld --user=mysql --datadir="$DATADIR" --socket="$SOCKET" --skip-networking &
-    TEMP_PID=$!
-    
-    # Wait for MariaDB to be ready
-    echo "â³ MariaDB: Waiting for server to be ready..."
-    for i in $(seq 1 30); do
-        if mysqladmin --socket="$SOCKET" ping >/dev/null 2>&1; then
-            echo "âœ… MariaDB: Server is ready!"
-            break
-        fi
-        sleep 1
-    done
-    
-    # Check if server actually started
-    if ! mysqladmin --socket="$SOCKET" ping >/dev/null 2>&1; then
-        echo "âŒ MariaDB: Failed to start temporary server"
-        exit 1
-    fi
-    
-    echo "ğŸ“ MariaDB: Running initialization SQL..."
-    
-    #setup db
-    mysql --socket="$SOCKET" <<-EOF
--- Set root password
-ALTER USER 'root'@'localhost' IDENTIFIED BY '$MARIADB_ADMIN_PASSWORD';
-
--- Create root user for external connections
-CREATE USER '$MARIADB_ADMIN_USERNAME'@'%' IDENTIFIED BY '$MARIADB_ADMIN_PASSWORD';
-GRANT ALL PRIVILEGES ON *.* TO '$MARIADB_ADMIN_USERNAME'@'%' WITH GRANT OPTION;
-
--- Create application database
-CREATE DATABASE IF NOT EXISTS \`$MARIADB_DATABASE\` 
-    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- Create application user
-CREATE USER '$MARIADB_USER_USERNAME'@'%' IDENTIFIED BY '$MARIADB_USER_PASSWORD';
-GRANT ALL PRIVILEGES ON \`$MARIADB_DATABASE\`.* TO '$MARIADB_USER_USERNAME'@'%';
-
--- Apply changes
-FLUSH PRIVILEGES;
-EOF
-
-
-    echo "ğŸ›‘ MariaDB: Shutting down temporary server..."
-    mysqladmin --socket="$SOCKET" --password="$MARIADB_ADMIN_PASSWORD" shutdown
-    wait $TEMP_PID
-    
-    echo "âœ… MariaDB: Initialization complete!"
-else
-    echo "ğŸ“‚ MariaDB: Database already exists, skipping initialization"
-fi
-
-echo  "starting mariadb..."
-
-# start maria process, replaces curr shell
-exec mysqld --user=mysql --datadir="$DATADIR" --socket="$SOCKET" --bind-address="0.0.0.0"
-=== ./srcs/requirements/mariadb/Dockerfile ===
-
-
-FROM alpine:3.21.4
-
-
-# tools first (alpine is minimal)
-RUN apk add --no-cache wget tar  curl zsh 
-
-# download mariadb
-RUN apk add mariadb mariadb-client
-
-# prepare needed folders for maria
-RUN mkdir -p /var/lib/mysql /run/mysqld
-
-RUN chown -R mysql:mysql /var/lib/mysql /run/mysqld
-
-
-
-# COPY config file
-COPY conf/db.cnf /etc/my.cnf
-
-
-# COPY init script file
-COPY tools/init.sh /usr/local/bin
-
-ENTRYPOINT ["/usr/local/bin/init.sh"]
-=== ./srcs/docker-compose.yml ===
-
-
-services:
-
-    wordpress:
-        build: ./requirements/wordpress
-        image: wordpress
-        env_file:
-            - ".env"
-            - "./requirements/wordpress/conf/.env"
-        volumes:
-            - wordpress:/var/data/www
-        networks:
-            - docker-network
-        dns:
-            - 8.8.8.8
-            - 1.1.1.1
-        expose:
-            - 9000
-        restart: always
-        depends_on:
-            - mariadb
-
-    nginx:
-        build: ./requirements/nginx
-        image: nginx
-        volumes:
-            - wordpress:/var/data/www
-        networks:
-            - docker-network
-        ports:
-            - 443:443
-        restart: always
-        env_file:
-            - ".env"
-            - "./requirements/mariadb/conf/.env"
-
-
-    mariadb:
-        build: ./requirements/mariadb
-        image: mariadb
-        volumes:
-            - mariadb:/var/lib/mysql
-        expose:
-            - 3306
-        env_file:
-            - ".env"
-            - "./requirements/mariadb/conf/.env"
-        networks:
-            - docker-network
-        restart: always
-
-
-
-
-networks:
-    docker-network: {}
-
-volumes:
-    wordpress:
-        driver: local
-        driver_opts:
-            type: none
-            device: /home/sgouzi/data/wordpress
-            o: bind
-    mariadb:
-        driver: local
-        driver_opts:
-            type: none
-            device: /home/sgouzi/data/mariadb
-            o: bind
-=== ./srcs/.env ===
-
-
-DOMAIN=sgouzi.42.fr
-=== ./secrets/db_root_password.txt ===
-
-
-
-=== ./secrets/credentials.txt ===
-
-
-
-=== ./secrets/db_password.txt ===
-
-
-
-=== ./.git/config ===
-
-
-[core]
-	repositoryformatversion = 0
-	filemode = true
-	bare = false
-	logallrefupdates = true
-[submodule]
-	active = .
-[remote "origin"]
-	url = git@github.com:gouzidev/inception.git
-	fetch = +refs/heads/*:refs/remotes/origin/*
-[branch "main"]
-	remote = origin
-	merge = refs/heads/main
-	vscode-merge-base = origin/main
-[branch "re-done"]
-	remote = origin
-	merge = refs/heads/re-done
-	vscode-merge-base = origin/re-done
-
-=== ./.git/refs/remotes/origin/HEAD ===
-
-
-ref: refs/remotes/origin/main
-
-=== ./.git/refs/heads/re-done ===
-
-
-7ee44ddee7e26935bbb5176197cc1d24c30b1107
-
-=== ./.git/refs/heads/main ===
-
-
-36d57e4fd09bcc271928ca60313caca5f3b900e4
-
-=== ./.git/objects/pack/pack-49787c13b5bc51a299c7c00e364263df31a6094b.pack ===
-
-
-PACK      M“xœ•ËA
-Ã @Ñ½§p_3êh„Rz•qÓ@Ó”`²èézƒî~ßT-C®”`‚Ø¼JJŒ,Ab!h­a3oŞôÕ­•’†V!—0»Q8‚G/,LÍ— ÁğŞëf§uÿÌU{ıi8yŸŸƒ¬ËÍb"
-”Ğö`ÎºÌ½ëÿ§9œù;r?!xœ•Qn!Dÿ9…ÿ[­l +EUo¹`’UºqlRõôEí	ú73z3Ó«ptvq>-³÷$.D¬g,³ç˜Ñ"Å(6w®rëƒœ?2ŠXÊ\ˆÅE7ÌLèˆ“ËËlxï­pÖı{Íò€ã¯š†|?o¼~NI·7 à½%wX^ÍH·µwùÓÜô	íõv*Z¯íVØ›d¯^ùtÑÖh¬é:^ÆÖ]›˜ZJS±xœ•KjÄ0÷:Eïƒş– ¹JGİòˆØ’±[Yäô1¹AvÅƒª''3p¨ÁÆB†£³¹ú%Z—GBÒÚj]3UFvêÀ“»€Ç„)Ø™‚-Ñ¤Å™äŒÃê3.‰²Â)¯qÂ:æO#ş†÷?zÜø±îØ¶GûÌâ½5Ö;oÚh­îuo"üS!\,ó€z_·~	n[[Fùº‹£Ãüœ]&`'˜¡ÜBmÃ%ç,2OpÌë¥~»QZò“
-xœ•ËA
-ƒ0@Ñ}N1¸d¢™‰RzLl ! ±‹¾âÜ=>ü¶«ÂU““$™™hŒÃD­¤¨´
-9y³í]wØêñËQ¿ğ¸4œ|meÉŸAjy‚õn
-g‡Ğ£E4g-¹5½š®3LN1(¥xœ340031QğMÌNMËÌIeX¬ûkFÇfŞ9í»­Ùoı]RóIÊÄ ŠS“‹RKŠ6Õ»ûƒÁ¼hõnÓö5¥½o²CU%3¨kY™Î–’*		şsßÒş˜¹Ò*ú Ğ	'–·&xœ•Ñ1OÃ0à¹ş§
-U€”xÏÄbß5‰°}ÖÙ¦ü|L€²T¸ÌşŞÓÉÏ87¨EHb€l_IÀ²œJTJ•Ø4%)‡¹!¡ë¦²:¬­
-ùşäŸà‹“Á&­İoìŠ§tI®ŞÌâ¡;nO]˜×ğ>8“)e¸*qbÁ(”Ò¿RŞÈjpúÍ¤‚¼9‚^Ø“¾¹}y~xºÓh²ÑÛ]ú¾é¾{¯ç»«UJ¨ı“—G^ŒàX{(ğ³
-œ—W;²Ãş±*ØTE ïûıºLÇõ¦xœ340031QH.JMIÍ+ÉLÌ)Ö+©(ax6÷ÑìM¯9{wk®+ºqèIOğDCˆÒ”¤ø‚Äââòü¢"”åç—V -M<‘0xœ    ¥xœ340031QĞKÍ+cx6÷ÑìM¯9{wk®+ºqèIOğDCˆ|J~rvj‘nr~nA~qª^enCÖñ†Yš~2Aßã¤T4®—ÕIŸbb 
-E©…¥™E©¹©y%Å³Î†
-Í;;uêûĞË“nÜx»« Ñ2™»=xœÅSÑƒ |ç+Lß›æŸiP¶-)‚”ö.÷ïG©Å¨×Ÿn	‰ìÎ¬™Y0 ;^!(ñá”fÓQ¶\0’dXÃµåjÖàŒ8İáÈÌG¤ÉæWJqæy›Hé”hk0Óø¬jÀæ¤Ú/µ”àêğ…s-Áúö—Ÿ©ê:íË±Èäù‘…5Én³°­·F™™ÒÏ<ÏcÊ+´T[’Páè}°‰A’™ƒ’SzM5§¬D!-O\Ş–†@ÿä]£´aw»‚øıÖ„§¶^è’º—kõ½ˆO‚—¸¾›«X^QäûÕw¹ÿÓ_7y¥s§·IòıƒFÄw•†!ûú/°k»¦xœ31 …ÜÄ¢ÌÄ”$†/ç/µş|´vÕåç¹%3sÙ¾¾©ŞmV‘—™WÁÀ’%¸‹}Umêl1‡›+<\ûúD¾<¿(¥ (µ¸˜áUF‹Ïœ^ÿöÎŸÏmÏ¬¥[ı ø±-ì¥xœ340031QpÉOÎN-JËÌIe˜-7áaMâ¤µÜÛrÿdš¶î·ş­*gb 
-ÉùyiUzuLjr
-ş¿”Xø_¾äyÆg—Dº$??§˜!}Vü³L_©ßë%<>­p½R}¶Qû mV(8½xœ}½RÃ0„{=ÅNh °5@—Ç e(Î’œÜD9ÉdÌÓ#Û	†FºÙ½ïtÚQR ùÌÑí_û—g¥ÔjJ¾`d)›	.9R2EP>¬E×ÅÔ2G‡ËÁUTÀLâñUX¦Ùt‰>‘E a²Ã~Õnwg<»X,‹Ë$Ñ9ë,Æä­“¶U’­yN–]†ş$ÑæröĞÍÜJ«ÖFsl[ {Ã*î¯]ÿ@Ë
-&å¹qäCKÃ;õ#h;ô&Ğ®š†,õ/Ñbª(F8×?Øª^¼¾£§ÒN†¼8*Õ>-sN+Şw÷æÙ}|àé’­¢xœ340031QĞKÍ+c”èX¦üm[Û¥óş]©–«¥h‘OIÒKÎKc¸·PİÎz§áÚ'—”Şy­ş` #y¶	xœãòuòttqŠwqqtrvµÍÌKN-(ÉÌÏãâ‚É9ºøzúÅ‡»ù9úºÚ§ç—Ve¢É8‡û¹ÀdáÒ mHzs3På:Ár   oy,ù³xœ…K
-Ã0D÷:E kÇ…”ÒMOBPd…šø“Úr ·o>İuQ„3Obt©$F—µ_k
-#´~Íog:(™Sõ¬	İµ^0ig}‚ibÙıTÂé™ï¨wƒF¡1‰sŞÖ®õQ0Ç´_5ÍõôÂ„$œTfÙ:-Gr‘ñá‡PtÅÆğƒú,EÃ=YÈ“U@ÏjKŠna€–œå İß'?2'Z£xœ340075UÈÌË,Ñ+Î`p-4åñÖÛµ)æÃì#oênõD,¯  Æ÷î°³xœ¥VİnãD¾÷SœºaÓ®êd\ íf…›¸­µiR/Q”Ø“Í¨ÎØë·	!q‡T!€—< 7</ À™ñOì4[„Ö­{æÌ7ßwæüx{«=e¼-æÆ6È(
-E›q&[øn*Á¢ ÛàÜ0	l„/ÁÂ˜
-W£åW,‰ø‚r	W$adR;×LÎ! 3’†Rì§öÈµ{‡»wê&göx|>õ:fãËÍ3_™å’íÙ‡öØ©chVÚ=;#}Ø§5ãÚDXo¢R›P[¨ízî¨c¶Qa;dÓöb)^…¦1vŸ9')ÏÆ‚ü§%"ÿ—RùÏo?ş§Ê;½ÃÇ0–$‘Œ¿åoFBö‘,â­V [.Ò„BœD1M ºæ4suÍÁŞâ±¾CT˜(¨îœú—êüäœ	À9§0c‰€†N|[``6r‘¹4øü@Ùrğ*DÜşô÷Ÿ·+G´¤¾¤ÁŞJ’ÒI¦DP­LéÛ6¸…Õ|
-3K!é"7òc?¡DÒŒ¶&¶è“Y”` út"ü9]= Òo•0B,Ë`j1.$	C+˜Â…P—e¥‚&ÌeÕa…°¤SºÃ¬M‹K[ÈG"ÜJPáŸ¿ŞpÆ((’,w¼ÂóDòø(Óxİ+zIP®cávT0a®E<\î€Sy%—»™R}ÚuM• ƒcYàš…¤Oñ} 1=çôlræö:­*Ås‚Õ@	(YF0¥€‡,+®øëö•'ÔœéÖ.¨¬* ¦†4v}ûğŞ£İ¢Òû«Z	hµAK¬vyÚèU›§aï>}°_	ââÊ)şúmå°2ZošÓ–Y[0ÅÁËrdÆÊGRÃ¾~"N«*/—L|™bb¨S¦‘KÚz{Q¹ ×ßU2+4”Ÿõvw‚p%ªúIÈ•ÕBú‡×+ĞQÊùİªãúë‘Œ–j¸hBÁøMã2IW‘»Iõ“'–3<2,+LIˆ‰£a÷=gªFCSÍ4?l†‘OÂy$dÜ3ğÜ#×éÁá§Ğlln/ÍCwuuÉğUòè ¤7’&œ„Ès¬j¨Qİ‘c{N¾ëhÑZÈ;ÿƒÀñÈx`÷ûp6r?vûÎ±3†á ¶‚7ü]Î]ï2„á™ç5A$CægÇS:<—P´Np`0ôÀùÄ{c¸xÑXo®/²óìØ#»«œ>v<HåìƒÅô}èû}…—¿ORÎü( Ÿ½‘Šrñ<YëÑ÷;²ÖïñãFEë¾½»oÆŞFÚøÁ3'ü%ö“£şóñIşÀPÑiÔ2å—ï+õdJ]óÕ°×“¯Ì–û3ß²ŠÇÁÍQd‚ÀÔ&ïZUçFQº×“¹VñÜzc¢Æ!öp¬|4Ì“³,ß¬–õŠNMB])UùRìê"ñİâ`XTŒ{û#~å©Î²ª{Œ¢ªÆŸÕÎ²çäu'¡qH|ıq€•qğ?5éõß²'âgq`‘ H°c>jé?ó_³Öjö¦xœ340031QpÉOÎN-JËÌIe˜öÿÔÎÎ¬·[y¾.œ.kVşËøßL€@¡$??§˜Áp®¿Ês×ou²ió
-ì¥&M:&Qœ ûş·.xœuRMoÛ0½ûWîeâ¤i·fğaÈ.†t@¶SÛƒ*S¶Yò$‹óëGÙĞˆöãã#%>å]ÂôÚâæ&_-“$¹rÎPÚ‚st€N[İ	søÁ‚è ê²ÌºL
-Ù"¸mN¡9x/"´QPÛ@Â°¶ÇKÙs0–HC=i¥¥ œRºC­=d=H²˜ØWK¦à¹´Ç?oË{`ádµÜÜİ2€8‚b³*×Ÿà)^cn ÿTç¯<ò_i9ÒÓ™†—ßÛê×¾Øÿ¬öÄ½ß«­¦±x¨|#¬>	ÒÎÛ]7œt¾^åÊ§g	~<¤Q
-%}1´V_wûÍ[ş"ÆIaZhñíÇf¹ú˜—¼—éü"²í\weyñfïxëõÅÛñLéúq¶E!Uy<Ş&¼’åùÍdiü×É ¨h´Ø,Ëœƒ$ØY”óóôchì5š|ÛÓ" Zò#ôN[6$Q7×É„Ïğc:I¤H³&µÀÎ±3”úœ>ÿÅ¯ôk¦xœ340031QHÎÏKÓ+OqGø>.~Ù<eãÇH=ÇÄÊ›¹†EùÅ%ÅÕW^Íx]³yëš™œE<Şw:OÚq ¿›uºBxœ}SËnÛ0¼ë+¨I£K-EQ¤@€´(ßúhj%¡H\Ùq‹äÛK="?â”rÅr8«hcİ=º¬qV¢÷èA´dÓ(Bç¬Ë´-¯…ã!à¦Tæ÷	Ö%r\µe€*#u›#p$9‚¤5Ëù[ÖÛùèoãxË
-¡ªnk0m½B¶ ¾5	ƒ¶õŠJRÖx JHa`…`4˜Ãj»G'`P£6åF…ûd—³y’FQUDÍx­2jU#£mƒ>í!M^(n`7Ü]î´iå	$Éx¯Óãı‹Å¯Å‹äÀ”Q#øÒ¶Kæ¬p;„³–3rA‚o6¤åjw(er|fÖTÍUTë]™õ:“èHJ
-:RCÄ¤£ôµŠì·§«Bâè `Yiµ‡åíİú’ÍÇõj§m`&Ÿ¶v/ÛrÛ¬óÀCÜ:ÕOø$øC,\¹÷É/¸Ÿàg‡ÿOı>™%é d©2ßhEY#¨Ê”),ü>c=ãùgçñéªFx“e‹w³Ùì4ğÈÃ×Øœ¨áîÓ÷›oËìóÍíõ×_®!Î­lëğ³e]»ÄÓ…¥SõİuÈöÜô¬‡Ï7,ÿ …;?p¶xœ342×3 BCÈÉONÌÉÈ/.á2D“)NÏ/­ÊÔ31ÒK+ P¯9¥xœ340031QpÉOÎN-JËÌIe8´LNX¿ïïµ–ØC_ß¾ëºÿ½‰($çç¥1blö~~D6h‰ÎŸN×´?²…µÁÖé’üüœb†Ù{ª¹®õt‰²ízsçõu¦¥/î 	H+‹¾%xœuQËrÂ0¼ç+4ÃI \Ú^û!c;‰Š-»–˜ __ÛÚğEÒz¥ÕcHÁƒrÉ¾ï»—]Ó¬@Bp&X/€	½r›&T<‚2Ú–B«•,Ì£• ô)9¸òÔä·BbQÎ!§ŠL±íı³B…v£Të/üí°ºÑ„»ı¬p¾8PuªpqÆEäŠK¥³_``I·NZ¶ÌxKĞY¤a).áh	¯6Aó¬E¯*shµCKRÆ„@§d½K ‡,– ¨„$ğ¶İnâtf÷7bWè­è‚¼î¸éçy®¿Yá7mÎƒV±®lªÿCwr½cŸ·Ÿ¤ã	ºuÂXüzå)ßtFç ÌˆO6ck{¶|0¶âXÂp(ìšY.ÑÀ®É[H—ä¯Î7Ñ>¡xœ340031QĞKÍ+c0ëõ?˜;½’ëé	‹0ßÃúNl1„Èdè¦äê%çç¥1¬Ò=¾A]Ü×Ùá«;÷fV/a?¨ºò]’Ìt= }ÿ/˜Ç­ÿœY¢Xj—},õø Şâ*D¸
-xœ÷r	rwqŠ÷sôuµÍÌKN-(ÉÌÏãâ
-G–ôğ±ÍM,ÊLLI²2660ãâòô‰ò÷‰p)·-NÏ/­ÊDÓìd[œ˜“˜*Ğ–C’qtòq²İ<#lËâVF4n½-xœeRMKÃ@½çWìÁc‘´"ø‡Šµ¥©(YÖdÒ,ìGœÙm›ïN¤XrÙyïÍ›İ7Yïv»¯, ¸ÎûªË6ècû_M\ªóóş»¹Îó<kmBªÎ)«ËTœ[µ—e£M…½ö’1
-
-ƒLŞ[@Jà¤j'©UGÄøàpJ\„Ÿ»LÓ³[Q@Q‡.k›VªŠm·ÊDXWšÔ·YGWí}¥&ØC9jQh0¨cdQ—^gLj£6keŒßÉˆFÖ¾Ç¾®3[{ä-EŞDjuŠ£ò@."l'ÀmÅV¡æ»¾×Q‰º4J¢¡­ Rpn#m³Ò€BÉ½œ–ëùòa±œ…|¸—OóbÅ·9 CíÛôu6Ô2:Ô¾³åPËèP»˜Cı9éYMï_f2Ÿ?Oš)Nw˜¶Ê•Ğïäo¥¬ÇNmu`ƒñäêõ˜N?/3òºeĞXt‘ÿóõ•¸Ixœ}”Mo›@†ïş©Ò:–	—*¥Uµ6+Û*5°¬œVØ³–¦QÕÿŞ]ü yfæÍì×ïÅ¡™&H!²Ê|)Œ½Èã4yh'yxD1Hõ…2Ü…B,JØŠ2rK¬*˜˜£ã4Ç1kÆ7>óÈ”˜ÿ“­ãY®Ç|Ÿ_l÷÷-`M²! ±u—ú¾ö‚®ö.¸tü`jl]`¾¤Ï4Cj9î>èº8¶M-€4¶‹‘l]NmÛÙr¹t¥["Ëµ‡îí­}u>×¿ğµ‚0 
-3ù¶©„n‚%ÿÁT„ËC^E]'Òky0n°Dr+øl¾ñË·À
-÷uùo;‹³øj}ËŞâ3‘$iŞK¯õœµënÑ¹È÷ØK6ûÔÈ¦`İ¦Ÿ*îp“|Í? ¹?in•Ş£¹…v¦áºcê“!¥ŠüGOÃ§æ€Ÿ¾y)8yã®N’4Oà("l­¦šG‹Í6UYf*Ã)¹ÚòP5zY6…JŠ0J¥Šp§é4†1ÜÁ)H¤¢Ğ™ïÒ`©F]½GZá5ÃÅ6Î­•Ç9< 1›­ø7•ø\§%rİ8»juïT(uÆJß<äñ?±Èf›¤xœ340075U(.I,*Ñ+Î`¨dµ”¶_’¼`w}ºÂÿ;ÉÂ$Ø Ë×8¾xœuP=O1İı+ŠÔ-ÉĞuEbEbîîrIÄ]9iûë	¢-¢“å÷%û-ïcd¨óaÙŒV¬i­= ¦*vcòh™ÇÂ®VHF”
->Š•@Í;A)uoÌM¨3{3[qU´XÖşõ#Kù¥¹¶[ôêxî¨ÔÓúDsõñò¿ƒh(¦¨!§)z]ÂŸG\kÑ-v!·õŠ”ßòxÚ{¡Däº›^%ËW•=DMeÑZo:wtÃyÜA=Û[ˆÜ£xœ340031QğMÌNMËÌIexsŸÅªuY¼­ä‹˜“ù¯åç
-/41 …â¢äb†ÚËÑZªšs„òƒîoïK>W\=w9 :OM¾6xœ•R±nİ0œŸ¾‚È!€¬¥è` ı‚n‹²DÛBdI%©$èÇW²4(Z4™DŠÇãQ:ã¨.\}W€É±!üQá†IØ¤%¤#9G6kfa0(îÕÅù½noa§ğÙ="Ë[ÉŒPh=Õ½já6F¥¥–×™´J[Äp®ä‡Xoî¾»=?;\D›Şäµx+úúæ.$–6\¥ø÷
-çY-¡.”’dİ”o9u˜²‰K&Ñ«HapV»šƒkÃxç<Èg~ø
-;h4Æçç³õÃ¡}hŒ&†T_Lj’j–²ÀÏã¹z¨µGK[&ĞLe2¼6Qæ¯ÒÂæàÑ–ÜPŸ÷CëUtk†|ëõ{»ùÏŸ€Ã’Ğëézÿ1¾ïï^2YW£%hO9E¼yİHÿù›'WÏàO&Õæˆ÷ıã)ÛáïH»š×’Øü2Ôà7[:ƒê;Œ§UÔ~Œÿ5lïQjş úÏ_YpƒB5µEf¥Oİı¿ ÄÀ4Üà‚xœ{Ç¶91'gò&¥±‚Ì 5¡²¥xœ340031QĞKÍ+c°üU¼7ñ[Ey£¬M|cÈq¥à~SCsSS…”üäìÔ"İäüÜ‚üâT½ÊÜ†fü¯ÚÎPÍd¸È#É¼®ø¸°©‰(¥–f¥æ¦æ•3Ü’='×{âê.'™+¾¢‰n—úN ’,¸xœmÎA‚0ğ»ŸBè¾Pºî°Ú  9Û›H§±tÆ P6¥èÓg2ğÒí½ßÿÏãQÁÉ©Ğá‡{?}Úå¨óÉ&m¬]ç3Ú˜T 1ÚÎ¿ÂåœSU™,³¦{} ğÓxgÚÛªËİWïÛÁÛ¢WÀ$‚õq/	@-$Åƒ	áW.…PBBùüq¦ËÛ÷`.‹”¯”íâE}¾>xœ¥S±nƒ0İù
-]‰‡f²Ô!U"ui© UÇÈàkjÛÄ6ĞªÊ¿‚i1MR,îî½»Ó{`ºâ æÈ=—]ˆPZòœ´À%× @ZƒÏÇ¨T^Š¾·=!ª•f…cBF-%¸¢×uß­È´KC»÷"Sò`°ÙŸªë—`›-o-SÙtè J[µ\Ş’æqHfvJ^œ‹?é´+¿]×83[ÈŠk%ÛİCîú~÷%Û»›/|ğ%ÙÄØF#ğy•$¯Q¼î}6"=­7¡N“N
-ª9eiç£K¦]ì;şõĞæ<ÅâÓóigâ(Úzù,×[8ãë$~— ùâƒ`8Îãî2@FÈ7Ü" `à(xœ{Çş…}BkI~~NñÆîdf >ŒåäxœûÂş‰cBKr~^ÚÄ‰ÌÀ µ¢¤(1>#¿¸¤ØŠK
-t”Tª]ü}=ıâı}]k­Ìõ€ĞPi²"ã¦$ßÈà@Ÿx§xÿà[•j~-’9‰Ğ`× ¸*SI€cpp¸LÙdFfQ1¸± GÀ˜lÃ´QÂò÷ÁĞ?ù/“dv½P>uœ˜À< '(a¦xœ31 …ÜÄ¢ÌÄ”$†¤O)gV”XÌìvª8zÙ¹¸Lëã™&`yé™y<Y™w~~¾½ÙÈë†ş¼ƒf_œr òåùE)E©ÅÅÂ.Ú¿M÷±U½,Z½ÆI?åx‘İ %)S¯xœ340031QĞKÉOÎN-ÊLÏË/Jex6÷ÑìM¯9{wk®+ºqèIOğDCˆB°º´ÌœT†¼Ú­“2,®ÓŒ{luÖéÁÌ•{cM€@¡$??§˜aÏÊE²QæÏóÏHgn½º¸¯–˜$ Â/ŒétxœËÏŸ-²ü¡ÒâK‘;«kû¿n˜”¨øÂˆµ¶ £üf·0xœeRMOã0½çWŒX	$V‰+ñq@âÛ•ö@[@ÇPkÛ;ãBÃ¯ÇIú•K‰fŞäÍ{Oş=ŸŞÆÒHwU.­el0Ëæ!æoa´ŒÇÇÛq¥µ7ğ’AzjIFê2g¤w¤ƒ¦²]\7ÕSâ]’°¦‰5}9²8Í²0v¼$„@>$*mUôdA:©Wfãw"ëiòĞÓÑÒ‰ºáÿVïÖ©…ÿpÏ¡®º÷·é­˜®neÜzW™·VÉ]ëã×DÉ´ÿ \E$'-(ï\R·Ã¨!7pÂ¢4NçRkBæâtPÂ5ŒŠîˆU¿S¬ã*iUhq1Z§Y(Wõ‚B“’7ÑHk>e»X‘	1»Î;¨è¼Å:ˆMµ—¨òÔf¹!Tº7L­µ¨½†Ëóó!Óa¢ƒ8¿­\Ï»è‚§˜ŸfÓû1œ.Û‘Ç„KéjP¼qmÎØ+ºímîæ^¤üöË=ù?W‡X6<ÌŸgÓ?“ø{4^¿ °Å÷æ‚xœkg›Ì¶á$#wI~~N±~f^f‰ŞdG&±ÉOÏ°AÄ&o`
- M ­xœ340075UHÍ+)ª,ÈÏÌ+Ñ+Î`xİî§UÖğğÛ;‘/¥G.cYñğ€!Daf^&PIaÃÉ[g¥:#’j¹,§Ø|ŸüóèZÁïñ ØÎ"¿LxœmTao›0ıÎ¯¸Òn‘*‘Hû¸¨ÒÈB;¤4©€®›¦)2øR¬:6³MZ6õ¿Ï†4MH¾ w÷Ş»»çg£œ‰QNtéi4 çÃWDàÓ†‰G Ä0ÈF2
-TšI…\WÄ°œqf`Z×¨=¶‚_PğG¢Fœå£u£ÿp~Á”(< ,J	~KãÀw,·6&ÓIÇF™ÂÂHÕœâ+Î
-£‡Ã¡oñÔµ‚CÂÑ¥·bnœHèZ!TJV¨ö`µQualÊ[?Ù·T=ÏÊ|$Ğ†ŸÛg¯¦U-º:ÂX0Ãg¬ê²Èn½nô]…›ZàóÁä®®¬E\2¡á|Is‚Z£ºêˆƒÀ[áW=ÕVAjˆ2;PÛc7×•Töo¶2Ú2'á-ÕôzŞeĞ>¹~bU Ğ<Kõä >z£WşÅ™ï<f`%ÕÏŞ0Gë»’aœä½ZÆ»İºf*”ÀeAx)µq<Œ£0c rgî*ğA!¡ÍÖš#VğÉ£R´®NjìmïÖµÖGºP¬2ÛeØ¼p¨'kZLo;;Zï&Q˜E0³p¦Ä×0_dıˆÓ,…‹ÓÉrŞF¯cÿ¸é>’^Ã íp‰×Á—Á‡ÄÓhÅ×q4…ÉÏmú.LÓ‡E2} Ş$á<ƒp6ƒ»$şÏ¢›(…Å|OÄğ²ÅÇÈõì>ı¶0n¯˜–µ¡îx÷Gç‹7ÿØ|÷{8Uônîºz‹vlP›´·ÄG%kAûŞ<áH|ÁNØò?5P—çƒ\xœ;Ïù„sC$3›odp OüäHf#V0sr/³,”µ†ÙH"íâïçèëZ«§¥â¯ ®RQğ‘ù rh²'xœ…Ñn‚0…ïyŠs³°™è“U)Ò„ ¡un—+BV©kaÆ=ı@MdKt·MÏ÷Ÿï,rJE@™NÁB$© }e\pŒ}ß[åÜÔóÆc,¬’Bë”Å¡jJ­ÖØÛê«Òj«œ·8ÓVœæH¾Ûšö»òŸı, ‰`!£æoğ÷Ò¹ş’?½Z–]^›Ô¥qÍ=NßvieİÛ-s’8F–³Ó%åH“«åd‘ş®ºf"Â9˜f‚¥É™M´6Xch³­jÖì ë#úfŞ*zİÑ}êÉi.N²K¿YF8_§yğx­ü„uDóÎ¼û<ó{°’ˆ:Ülà|w¢SìŸ…o0ºÈ_7ÔCİºr0+U»Ö*lJYŸ^ä‡‚*
-µi¼0^ñhpkúØ£¾)®xœ340031QĞKÉOÎN-ÊLÏË/Jex6÷ÑìM¯9{wk®+ºqèIOğDCˆB°º´ÌœT…IÕÅ÷YNxÚÏşc{Å1$^*÷¤‘‰($çç¥1°¹-ç~æÉê«ïõ¶„äşúŞƒ ¡k- ¾$xœuPMSÂ0½÷WìÔ«1h©(NâI(:££B“ÒJšÄ$µôß›ÒvDFsH^ŞÇîìŞ/ãP¶Î‰¯KÎ«™ç-Ÿæ@”…RQb ú€ÙhBQ¹0–pî(xóÀ±ÉÅ®ÃR1aï~I©{¨2…RU´½Š-Í5`f¼ci•>¯Ù' ]8¸$$e%µà2t«¶¬mÈøb0¼ê ÇÉÒUmÑYãïlÿzm{)×àãI4»Å«ÇhE8ÃíGçA0Â“yÄeBx&õ=ï¦Â”šAUUàfc‰•º¶Ë5@…ŒH¤nPL¹1¹æ`Hş"»8³ßKI&+hÙv+°dÜƒ?Í…¤y†G²7‰/Ğ*Ez¸‚Öó¦Ï‹x5…á0p‘Ù¼ú{Õ?mš›VH2Moü÷oDr»„âTxœ;Çr…eÃ?F¶’üüœbıÉÿ K2¢àxœ»Âr™eÃ?F–äü¼´ÉÌL 9ÿò¦xœ340031QÈKÏÌ«ĞKÎÏKc0¯póÒÇØ­ç¾ÉãµiRƒév Vº¶/xœuRËn1¼ïWø°×^—vUUQ	‰VUáX)Š²"²I›—ıö’…²”RËã‘q…	vÁÁÖ>.0JíCÍÆ;‚N»Û/²}–Í™ìj˜qÚ.K„ÊTØâm@*ê|‰Sµ´,S
-TÖh•X„×Œ|GQUEVc	ã
-ã‰0™5Äè ßï‘-Îù#P:U!X¯•{â¦ÜàÈJ‘Í4MEÈZ¸™qq(£–­WrÛÛ]‡Â?Côìµ·“ÑxÕiuOoï>zÏ V*Šõz-æ\],i\‰›£o…y8E	Ó„'áj­üQX&ã¸•Sc‘ _FS;âÌû˜«8£fìşï/ÏÔ_ğ™Zò«	SE¬gFE”î¥‰îÛívqxµÚoĞÏ%5¬QUt›¨®Áøùcø>‘/ÃÑàíéu yéõ²:±Lúæ?`ÒÑ®¯æzİ}¶ÿõ/Ş¦xœ340031QpÉOÎN-JËÌIe±¸#®-y­cÁæì¹&Š“‹šêM€@¡$??§˜Am±Âçó³eçä»¼»Ä<Nİª U>±+xœmPANÃ0¼ç+8ôälé¥P‰PP›(AE98±›XÄ±†òzœ’ªiÁkvvvìiÍ€ñTP5¹Aò<ªÔšQÇl{Ln(;¢„²–¥§`€?MÎ]5ÊjSvPš¬µìUrk?ûİqÎúÚÔ:#TŞ£¾d_ı-tğ»ÂÎ†DP8§íÑĞ&Ì…+ê´¶Üd•r\¹0«$6şÍR`Z‹’YÌ¢iÎ-ê‚š®¶¸³-dÅ`<Cø·)?˜0@4à¦m,œ,÷ƒU£€$àiâ“¥“=øO-7Çş€µ5˜
-åÉ 8‡›J­E^ñ}L¦ñl7e9"``±Öï×°BS«•_Fï®ËpÔÆÚ*û8ˆ®†Ã! ¹ËZzzêª*CÖ~Í¥Ö>Ù›(^‚ó´E›¡]h@'õ¡<Íé´û%·ÉéÖw¯qôt·ûŠ/æ‹dGó¼œ½ÿ ÀG×	ëqxœÛÈÚÀ6áB€B—ä&e&¦$é&çd¦æ•(((+8¦¤(”dd+ädæ¥*”ä+dæ—$æä S|+ƒ}ô}Aš\œ šJòósŠ7^|À g|Ş¥xœ340031Q(N.Ê,(Ñ+Î`pÍ*÷f
-8|ç"ïYîş˜æÿ›f  áİ»8xœ}SËnÛ0¼ó+6r¯”œšÀ	R ®«maĞâÊ"B‘,IUp¿¾+*ÛmÃƒ qggg¨áì¬Ø*SlEhë¤òÀ¾7…kcµ„â—ğÅ0E;ÍØ–FïAÚÁh+$¬­—¥Ç@5`l¡=
-¹G›h"£íop¼lp¼¶¦Q»œÈ3øq±EÃ€ÖÖBEh¬‡…ğJÌo!ZØ"$²éMTº}ø©…ì”§Ìx›}˜ßn–Õ×8JÓĞ+Ò—zÆ…uk!éGü8AŠ(È2©1XGeMçÙkGĞˆ.Ò·´ÓKzz<¾Ùç\hmî­'°Ñ(Ô¤?â¾¿â\nèğ:yør³¸ËNª}@?U«»ÕiÕ‰¦jySUëåj~Šhmˆ×'t\­[á Íeö·MeB$áÿ—ß{Mìëró¸ú|LUÔäë“©Ñ|\M?pó¹	1(aï™œØ	EZ‚Ğ¢İÙş·:?ÿ¸÷òÚvÖÓğ–ÚÉ¢5’éÎiŒ()¨ş³ã%àÏ†êI¹”ÆC6âhcS{…Où+J~_.RŞèğÆu—ùğû?û	˜â‚Nxœëf_É>á›odp OüÄcG ¬É]Œr¬`æäUŒ2PÖZ&ñÉ÷9aJ^0Î…J´3©À•Ü ‘Xõ£xœ340031QğMÌNMËÌIe8zJXşú·Ú Ñøeün¬°óøvĞÄ Š‹’‹4'Ÿ^dìçàİ Ìmõt®hşÂSÙ Qm	¥xœu Šÿ100644 .env ]ºÑ;WE÷Âÿ–ìÂ„r100755 docker-compose.yml ²Õ	æ8]ıD¯èc<oÑ40000 requirements ½!O_$¢ŞŞ-š;§Ñ:’ş1½¹è9-È±xœsqŠ÷ğ±ÍM,ÊLLIârqŠ÷sôuµ-Ï/J)(J-.‰„»Ù–§8ÁÁáşA.¶‰ÅÅ e\Aşş!X„¹]|=ıâãÂmS+
-s2¡BF!# ĞM*s§xœ31 …ÜÄ¢ÌÄ”$ãs)–ÿtù4õ–Í=b¦zèSWÀJ°Š¼ôÌ¼
-†Æ¢WN<æVÂTµù²³q¶×‹o†f&&
-%ùù9ÅÏæ>š½éâ5gïnÍuåQ7=é	1 <¿(¥ (µ¸˜aãJÛø°­mç'İò^Øİä)Í$î Ü6¦­xœ340075UHÍ+)ª,ÈÏÌ+Ñ+Î`ğê:?ùàšÂĞã¢Ï$“*¯|ÈhQ˜™—	TR˜ÃpòÖY©Îˆ¤Z.Ë)6ß'ÿ<ºVğ{< Šx B¯xœ340031QĞKÉOÎN-ÊLÏË/Jex6÷ÑìM¯9{wk®+ºqèIOğDCˆB°º´ÌœT†˜Ä=ÍgY\êËY\m.˜db 
-%ùù9ÅIåOã3´oQÙ'Æ/´oQà^³ù;†Æ+±§xœ340031QÈÈ/.)fPœt¨íû»*‹ÙŸl’ş¹.c!DA^zf^…^r~^ƒé|…›—>Æn=÷ıKî¯M“L·‹  ş²xœEÎÁÂ  Ğ;_ÑÄ³3şÀ›€aqÄJ	05~½ÃÌ­=õµi«ô±“s* v–F.U¨ÕÊ§OèºóYˆ\FÏDü
-ñ"°áŠ%d;Pëf8Ÿ=8›~Ğ6aŒ‚!õûõĞRq¬»R#·‘ˆUx¿áÃÙRSFŞÍuÛÙÜE?XPÿ1óT1—/ŞGõ¦xœ340031QpÉOÎN-JËÌIe±¸#®-y­cÁæì¹&Š“‹šêM€@¡$??§˜!Ä1=%")äÛ‡¼oóS&¬)qz	 \‹L¥xœ340031Q(N.Ê,(Ñ+Î`È<èõüŸë†—Ù~ÿ»¸8¶U¯6ó" ”£xœ340031QğMÌNMËÌIeèÉ:ñcÎÎ«ŸÌ^X—\f®=œv·ÎÄ Š‹’‹¸Âïr_4ºŸ^öªò°ÌÙ—ûøVØ €®}å®`xœ{Ç¶—Q01'ÇJ‹39E¡¸(¹XAMm¢¯4'Wi‚•Pjò&¥Éÿ™4'ë2‹OödVeT  ²Ÿg¥xœu Šÿ100644 .env ]ºÑ;WE÷Âÿ–ìÂ„r100755 docker-compose.yml ğ[›²•¹ÃuKÌ_+­œ40000 requirements İÓQ²Ft¡ŸÄ%6düÎÊÒwï½-Ğ§xœ31 …ÜÄ¢ÌÄ”$ó–z›V>ŞS+±<+@#Z	XE^zf^ÃÒ£·´Ëì.’ßpÕÁÛ-½á±ükoC3…’üüœb†gsÍŞtñš³w·æºò¨‡ôO„P_”RP”Z\Ìàô‘UX>Å¨6ó8ïÕ¥JG§¬¨	v  Ä6J­xœ340031QĞKÉOÎN-ÊLÏË/Jex6÷ÑìM¯9{wk®+ºqèIOğDCˆB°º´ÌœT†3vÓ
-f/Š{Æe©Ü¿øZåİ@>™PUÉùyi¸L175UHÍ+)ª,ÈÏÌ+Ñ+Î`ğê:?ùàšÂĞã¢Ï$“*¯|ÈU˜™—	TR˜ÃpòÖY©Îˆ¤Z.Ë)6ß'ÿ<ºVğ{<Ô²’üüœb¬¶ mc`?¦xœ340031QĞKÉOÎN-ÊLÏË/Jex6÷ÑìM¯9{wk®+ºqèIOğDCˆB°º´ÌœTâsÅ§J†\XqvÆ3Ï'Şû¤g2@U%çç¥á3%/=3¯B¬Êt¾ÂÍKc·ûş%w×¦I¦ÛE ªJòósŠ± éÿQs¦xœ340031QpÉOÎN-JËÌIe›î§'|O¥\:óßİì‡ëÕşr˜ BI~~N1CˆczJDRÈ·yßæ§LXSãô dÛoIx|µ¼Q¢™ÇÀ6Bcß1¦	K
-=== ./.git/objects/pack/pack-49787c13b5bc51a299c7c00e364263df31a6094b.rev ===
-
-
-RIDX         +      7         3   >   H      %   0   L   1   (   
-   F   #          /      8   )   I   @   ?      9      2   '   6   A   K   *      	      ,   D      "   C   &   5      J   B                                 $      G          =   <   :   !      ;      .   -      E      4   Ix|µ¼Q¢™ÇÀ6Bcß1¦	K±Í,äMİ“‹cf']‘™x ö²
-=== ./.git/objects/pack/pack-49787c13b5bc51a299c7c00e364263df31a6094b.idx ===
-
-
-ÿtOc                                                                         	   	   	   	   	   
-   
-   
-   
-                                                                                                                                                                                                 !   !   !   !   !   #   #   #   #   #   $   $   %   &   &   &   &   '   '   '   '   '   '   '   '   '   '   '   (   )   *   *   +   ,   ,   ,   ,   ,   -   -   -   -   -   -   -   -   .   .   /   /   /   /   /   /   /   /   /   0   0   0   0   1   3   3   3   3   3   3   3   3   4   4   5   5   6   8   9   :   :   :   :   :   :   :   <   <   <   <   <   <   <   <   <   <   <   =   >   >   >   >   ?   A   A   A   B   B   B   B   C   C   C   D   D   D   D   D   D   D   D   D   D   D   D   D   D   E   E   E   F   G   G   G   G   G   G   G   H   I   I   I   I   J   K   L   L   L   L   L   L   L   L   M   M   M   M   M   M   M   M   M   M   M   Mjºª}e›@ø²Ç á­ëöF§—Ìä«Õï.·0UÉõïH
-WİSÑ2ßgvêyÃÍé¾¨>jiÜùóÛ³2F
-Ø/Á6ôBlşÿĞ7^¯óit!u>e[ÆeÇÄD+û5¾zépR«¬B/dÇr>œ²Õ	æ8]ıD¯èc<oÑ8Ü)[Öˆ ¼ƒk4!“r‚ Y*Àó4T·zÄÆµÿğ[›²•¹ÃuKÌ_+­œQˆ¦#ö¶†ÒğÅı©&b]*! £ óÏ›0oöÓ»t7^':u ’{sßÈI?›ü=ÔAT_mÉ2!’Â†÷îØ$h£aä¶ù®h '*:5›tTSÿÙ¾¥\$/)“Ë¢3N@K€S:åo¡Êk1O$çEö~fp?’’Æsc3Îd9ş-).¦Ä6%ÂÈŠP©5Ÿ ÙÒñ]µÎ÷ômœJ²’€5·6Õ~OĞ›Ì'(Ê`1<¬¥ó¹ ä7^OÁm—y
-åÈ8VMÃàÈ°7¨9.²©áR¼}§jP(o–R9ús½aèxw<_TÇ"S5Bñd2}iÇÕ¥"Å”¨|S@EjwKPÃÜì!Íd\ƒÿ²˜Eq5H.º²\ğ›Äì~ÚŒX§xHsÎsÁ•TĞ¨Í˜æIäK¾™ JŠ…%Z¥åæRÆs1:ôšxÙJŠÏ“Á¬qUÇAæbyû©áaTAgdXbTöğnöŸd¬pU\BéV—N.Ş$wo³ı»AÃ&ı\a¼ƒÍ D~w2EÆ³vŸR]ºÑ;WE÷Âÿ–ìÂ„rbwå^Ã ‡´$¾¾¢Q½6Ÿ¹bòdÌ«ñ£FÊs[¦Î^i;Çigš_æiMû¯Hò¨EÔ{Í+üiÁJçşE°ékĞûşÑ£]….}iÑjÇ€š)NR÷_qødx¯,g”n}µ’hÄp£~)^ã:ÍBà™©½]y9?¤c ¦g ÿÜcĞz.~& O‘ôt8OÓÒIÌLºH{Ôê˜ë|³µø|™	rKÜ‰É>}Ó[*%)œoRß·cÎsr[§~äMŞçâi5»µa—Ì$Ãƒèê‡ù˜%i Ñ®sÇ5‹™‘ñl¹Õò6è;tÓ}Ãfİ~îôÏÇfU-v“QÏŞ[Å–&÷–ÿÊ¹‰jíµõ¡—Úšoé_¨öšÍUÍ••ïUÓ“PØØéR]ºŠ›á|a’­¶müi5…¿;û%›½B{
-ÖŒŠºìÜë×¥èŞÅ£-ú˜ŒH³œ‡»C;Úı¤|ò¥ÅÚ+v>Á¢°Õ@KFg€ãëK§á"£ÒY¹{}õ°’a!è2}{¨2“L–D7‚rJd¨Ğ Çú¨ŠÛĞî!Úğö%qƒ¯1¬=–©Ê
-3XMãséƒ”±ñY.AayÙmª+UÇ°'MCG õG³JN,±3 [©‘ÆFtz³ÓC3k
-èö±©=_Vµ†Ï’ÚK¡‹‚IgK¼©¢Z7çoÌ3iµÕ£š½!O_$¢ŞŞ-š;§Ñ:’ş1½¹ÁÅ.İø 7r«»5‡¬u±ÙÂƒKçÄR¤,ü‰Efüq}S;Â¦/ÜÖ„]ÂõQííE¿ïÅÊ×ö}R_¦ğ`Ø¨>HöÁÉÚÍ‰Xb}
-9”<÷“ùÅ­÷_Ì>–p›¢^æ
-9#£ÖyİQàÚÎ‹mÈÕºBÔMa(FÒÊİÓQ²Ft¡ŸÄ%6düÎÊÒwŞ¡>;¹1­äpÒ#¡Üë'à®åõ&Íc)ôv#“æÚĞ ùßêãæâ›²ÑÖCK‹)®wZØÂäŒS‘êh„LœO‡‰ùçâ·m“*-{ùë‡N*v€áöîôuÄÒÆ T¨áÀìß:…¦_=è\ÉoI‘Öom¡ôÏÒ…ùâ­ªÓçmt™mõì{»‹íşº«Küˆğ.ì“Å²FÓd¶hÎobŞ5GÁ¦û4#$ádnÎÄEÓ !~x¨ „1hcï‡ ÔX7K×ÿ'ä­|ÅŞ‡Çaş6èÔ±;sêÉëlëo³Î¤µJ·‹ÕÃøR½Ÿ}“©yx¦Ş¿á«‰=;âÆà6CÑ:­“'ñ;R›y¾W’¼‘Oö´!ÒéŒVeföJÁ¼OŸó“=¡áãåÕŸñÀá	Øæ ıÍ²ˆ‚)jş²nöÛ¨5–$Ìyô%*VêHÎÔ×ÈŒyLÎM;ö/à„,Ê7qñ O98«ùGÎ‘ß%oê¥T™¾Âİ…¹6>ğâ
-æÿŒ[ÅØgÿ¿t/ó'®{’më:õW²Æ;nv )#^ ŸXãF²ıì!ó  ´  '  1|  %  +  (›  Q  *\  ‹  )  Ğ  *º  &é  /Ñ  #  -E  ¬  w  '5     1  2‹  ˆ  3¼  ,¸  	  %w    !,  0½  (ë  &Ë  -Ç  /  ë  Ó  *ê      ©  @  †  â       m  1;  0í    ´  ‹    ö  38   Ø    V  ø  ¨  /  0m  .º  .-  Í  À  |  [  #Ë      1ş  +  ,ø      #ˆ  ì  Ix|µ¼Q¢™ÇÀ6Bcß1¦	K´ıhÀ&*Õºñ]©«Aü¿ª
-=== ./.git/packed-refs ===
-
-
-# pack-refs with: peeled fully-peeled sorted 
-36d57e4fd09bcc271928ca60313caca5f3b900e4 refs/remotes/origin/main
-7ee44ddee7e26935bbb5176197cc1d24c30b1107 refs/remotes/origin/re-done
-
-=== ./.git/index ===
-
-
-DIRC      h¢í÷Pch¢í÷Pc   B*¥  ¤  è  è  g£-ú˜ŒH³œ‡»C;Úı¤|ò Makefile  h¢í÷Pch¢í÷Pc   B,â  ¤  è  è    æâ›²ÑÖCK‹)®wZØÂäŒS‘ secrets/credentials.txt   h¢í÷Pch¢í÷Pc   B,ã  ¤  è  è    æâ›²ÑÖCK‹)®wZØÂäŒS‘ secrets/db_password.txt   h¢í÷Pch¢í÷Pc   B,ı  ¤  è  è    æâ›²ÑÖCK‹)®wZØÂäŒS‘ secrets/db_root_password.txt      h¢í÷Pch¢í÷Pc   B+,  ¤  è  è    æâ›²ÑÖCK‹)®wZØÂäŒS‘ 	srcs/.env h¢ò!ÒâAh¢ò!ÒâA   B+N  ¤  è  è  ÛjÇ€š)NR÷_qødx¯,g” srcs/docker-compose.yml   h¢í÷Pch¢í÷Pc   B+å  ¤  è  è  ­›á|a’­¶müi5…¿;û% $srcs/requirements/mariadb/Dockerfile      h¢í÷Pch¢í÷Pc   B-œ  ¤  è  è   –Qˆ¦#ö¶†ÒğÅı©&b]*! #srcs/requirements/mariadb/conf/.env       h¢í÷Pch¢í÷Pc   B.8  ¤  è  è  Ş¡>;¹1­äpÒ#¡Üë'à® %srcs/requirements/mariadb/conf/db.cnf     h¢í÷Pch¢í÷Pc   B.D  í  è  è  0Eq5H.º²\ğ›Äì~ÚŒX§x 'srcs/requirements/mariadb/tools/init.sh   h¢í÷Pch¢í÷Pc   B-a  ¤  è  è  ç–ÿÊ¹‰jíµõ¡—Úšoé_¨ö "srcs/requirements/nginx/Dockerfile        h¢í÷Pch¢í÷Pc   B63  ¤  è  è  *©Ê
-3XMãséƒ”±ñY.AayÙm 'srcs/requirements/nginx/tools/conf.conf   h¢í÷Pch¢í÷Pc   B6:  ¤  è  è   6{Ôê˜ë|³µø|™	rKÜ‰É> #srcs/requirements/nginx/tools/hosts       h¢í÷Pch¢í÷Pc   B.;  ¤  è  è  ^Â¦/ÜÖ„]ÂõQííE¿ï &srcs/requirements/wordpress/Dockerfile    h¢í÷Pch¢í÷Pc   B6ˆ  ¤  è  è   ¨7^OÁm—y
-åÈ8VMÃàÈ° %srcs/requirements/wordpress/conf/.env     h¢í÷Pch¢í÷Pc   B6Ÿ  ¤  è  è  İª+UÇ°'MCG õG³JN, -srcs/requirements/wordpress/conf/php-fpm.conf     h¢í÷Pch¢í÷Pc   B6¡  ¤  è  è  ˜şÿĞ7^¯óit!u>e[ÆeÇÄ .srcs/requirements/wordpress/conf/wp-config.php    h¢í÷Pch¢í÷Pc   B6­  í  è  è  y9?¤c ¦g ÿÜcĞ *srcs/requirements/wordpress/tools/start.sh        TREE  r 18 2
- Y*Àó4T·zÄÆµÿsrcs 14 1
-'*:5›tTSÿÙ¾¥\$/requirements 12 3
-šÍUÍ••ïUÓ“PØØéR]ºŠnginx 3 1
-jºª}e›@ø²Ç á­ëötools 2 0
-1O$çEö~fp?’’Æscmariadb 4 2
-ôÏÒ…ùâ­ªÓçmt™mõì{»conf 2 0
-z.~& O‘ôt8OÓÒIÌLºHtools 1 0
-gš_æiMû¯Hò¨EÔ{Í+üwordpress 5 2
-êh„LœO‡‰ùçâ·m“*-{ùconf 3 0
-ÂƒKçÄR¤,ü‰Efüq}S;tools 1 0
-›½B{
-ÖŒŠºìÜë×¥èŞÅsecrets 3 0
-ÁÅ.İø 7r«»5‡¬u±Ù¾¥E‚cê‡ÍªS‘‰«l$ûô
-=== ./.git/logs/refs/remotes/origin/HEAD ===
-
-
-0000000000000000000000000000000000000000 36d57e4fd09bcc271928ca60313caca5f3b900e4 gouzidev <gouzi.dev@gmail.com> 1755507371 +0100	clone: from github.com:gouzidev/inception.git
-
-=== ./.git/logs/refs/heads/re-done ===
-
-
-0000000000000000000000000000000000000000 7ee44ddee7e26935bbb5176197cc1d24c30b1107 gouzidev <gouzi.dev@gmail.com> 1755508215 +0100	branch: Created from refs/remotes/origin/re-done
-
-=== ./.git/logs/refs/heads/main ===
-
-
-0000000000000000000000000000000000000000 36d57e4fd09bcc271928ca60313caca5f3b900e4 gouzidev <gouzi.dev@gmail.com> 1755507371 +0100	clone: from github.com:gouzidev/inception.git
-
-=== ./.git/logs/HEAD ===
-
-
-0000000000000000000000000000000000000000 36d57e4fd09bcc271928ca60313caca5f3b900e4 gouzidev <gouzi.dev@gmail.com> 1755507371 +0100	clone: from github.com:gouzidev/inception.git
-36d57e4fd09bcc271928ca60313caca5f3b900e4 7ee44ddee7e26935bbb5176197cc1d24c30b1107 gouzidev <gouzi.dev@gmail.com> 1755508215 +0100	checkout: moving from main to re-done
-
-=== ./.git/HEAD ===
-
-
-ref: refs/heads/re-done
-
-=== ./.git/hooks/fsmonitor-watchman.sample ===
-
-
-#!/usr/bin/perl
-
-use strict;
-use warnings;
-use IPC::Open2;
-
-# An example hook script to integrate Watchman
-# (https://facebook.github.io/watchman/) with git to speed up detecting
-# new and modified files.
-#
-# The hook is passed a version (currently 2) and last update token
-# formatted as a string and outputs to stdout a new update token and
-# all files that have been modified since the update token. Paths must
-# be relative to the root of the working tree and separated by a single NUL.
-#
-# To enable this hook, rename this file to "query-watchman" and set
-# 'git config core.fsmonitor .git/hooks/query-watchman'
-#
-my ($version, $last_update_token) = @ARGV;
-
-# Uncomment for debugging
-# print STDERR "$0 $version $last_update_token\n";
-
-# Check the hook interface version
-if ($version ne 2) {
-	die "Unsupported query-fsmonitor hook version '$version'.\n" .
-	    "Falling back to scanning...\n";
-}
-
-my $git_work_tree = get_working_dir();
-
-my $retry = 1;
-
-my $json_pkg;
-eval {
-	require JSON::XS;
-	$json_pkg = "JSON::XS";
-	1;
-} or do {
-	require JSON::PP;
-	$json_pkg = "JSON::PP";
-};
-
-launch_watchman();
-
-sub launch_watchman {
-	my $o = watchman_query();
-	if (is_work_tree_watched($o)) {
-		output_result($o->{clock}, @{$o->{files}});
-	}
-}
-
-sub output_result {
-	my ($clockid, @files) = @_;
-
-	# Uncomment for debugging watchman output
-	# open (my $fh, ">", ".git/watchman-output.out");
-	# binmode $fh, ":utf8";
-	# print $fh "$clockid\n@files\n";
-	# close $fh;
-
-	binmode STDOUT, ":utf8";
-	print $clockid;
-	print "\0";
-	local $, = "\0";
-	print @files;
-}
-
-sub watchman_clock {
-	my $response = qx/watchman clock "$git_work_tree"/;
-	die "Failed to get clock id on '$git_work_tree'.\n" .
-		"Falling back to scanning...\n" if $? != 0;
-
-	return $json_pkg->new->utf8->decode($response);
-}
-
-sub watchman_query {
-	my $pid = open2(\*CHLD_OUT, \*CHLD_IN, 'watchman -j --no-pretty')
-	or die "open2() failed: $!\n" .
-	"Falling back to scanning...\n";
-
-	# In the query expression below we're asking for names of files that
-	# changed since $last_update_token but not from the .git folder.
-	#
-	# To accomplish this, we're using the "since" generator to use the
-	# recency index to select candidate nodes and "fields" to limit the
-	# output to file names only. Then we're using the "expression" term to
-	# further constrain the results.
-	my $last_update_line = "";
-	if (substr($last_update_token, 0, 1) eq "c") {
-		$last_update_token = "\"$last_update_token\"";
-		$last_update_line = qq[\n"since": $last_update_token,];
-	}
-	my $query = <<"	END";
-		["query", "$git_work_tree", {$last_update_line
-			"fields": ["name"],
-			"expression": ["not", ["dirname", ".git"]]
-		}]
-	END
-
-	# Uncomment for debugging the watchman query
-	# open (my $fh, ">", ".git/watchman-query.json");
-	# print $fh $query;
-	# close $fh;
-
-	print CHLD_IN $query;
-	close CHLD_IN;
-	my $response = do {local $/; <CHLD_OUT>};
-
-	# Uncomment for debugging the watch response
-	# open ($fh, ">", ".git/watchman-response.json");
-	# print $fh $response;
-	# close $fh;
-
-	die "Watchman: command returned no output.\n" .
-	"Falling back to scanning...\n" if $response eq "";
-	die "Watchman: command returned invalid output: $response\n" .
-	"Falling back to scanning...\n" unless $response =~ /^\{/;
-
-	return $json_pkg->new->utf8->decode($response);
-}
-
-sub is_work_tree_watched {
-	my ($output) = @_;
-	my $error = $output->{error};
-	if ($retry > 0 and $error and $error =~ m/unable to resolve root .* directory (.*) is not watched/) {
-		$retry--;
-		my $response = qx/watchman watch "$git_work_tree"/;
-		die "Failed to make watchman watch '$git_work_tree'.\n" .
-		    "Falling back to scanning...\n" if $? != 0;
-		$output = $json_pkg->new->utf8->decode($response);
-		$error = $output->{error};
-		die "Watchman: $error.\n" .
-		"Falling back to scanning...\n" if $error;
-
-		# Uncomment for debugging watchman output
-		# open (my $fh, ">", ".git/watchman-output.out");
-		# close $fh;
-
-		# Watchman will always return all files on the first query so
-		# return the fast "everything is dirty" flag to git and do the
-		# Watchman query just to get it over with now so we won't pay
-		# the cost in git to look up each individual file.
-		my $o = watchman_clock();
-		$error = $output->{error};
-
-		die "Watchman: $error.\n" .
-		"Falling back to scanning...\n" if $error;
-
-		output_result($o->{clock}, ("/"));
-		$last_update_token = $o->{clock};
-
-		eval { launch_watchman() };
-		return 0;
-	}
-
-	die "Watchman: $error.\n" .
-	"Falling back to scanning...\n" if $error;
-
-	return 1;
-}
-
-sub get_working_dir {
-	my $working_dir;
-	if ($^O =~ 'msys' || $^O =~ 'cygwin') {
-		$working_dir = Win32::GetCwd();
-		$working_dir =~ tr/\\/\//;
-	} else {
-		require Cwd;
-		$working_dir = Cwd::cwd();
-	}
-
-	return $working_dir;
-}
-
-=== ./.git/hooks/commit-msg.sample ===
-
-
-#!/bin/sh
-#
-# An example hook script to check the commit log message.
-# Called by "git commit" with one argument, the name of the file
-# that has the commit message.  The hook should exit with non-zero
-# status after issuing an appropriate message if it wants to stop the
-# commit.  The hook is allowed to edit the commit message file.
-#
-# To enable this hook, rename this file to "commit-msg".
-
-# Uncomment the below to add a Signed-off-by line to the message.
-# Doing this in a hook is a bad idea in general, but the prepare-commit-msg
-# hook is more suited to it.
-#
-# SOB=$(git var GIT_AUTHOR_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
-# grep -qs "^$SOB" "$1" || echo "$SOB" >> "$1"
-
-# This example catches duplicate Signed-off-by lines.
-
-test "" = "$(grep '^Signed-off-by: ' "$1" |
-	 sort | uniq -c | sed -e '/^[ 	]*1[ 	]/d')" || {
-	echo >&2 Duplicate Signed-off-by lines.
-	exit 1
-}
-
-=== ./.git/hooks/pre-rebase.sample ===
-
-
-#!/bin/sh
-#
-# Copyright (c) 2006, 2008 Junio C Hamano
-#
-# The "pre-rebase" hook is run just before "git rebase" starts doing
-# its job, and can prevent the command from running by exiting with
-# non-zero status.
-#
-# The hook is called with the following parameters:
-#
-# $1 -- the upstream the series was forked from.
-# $2 -- the branch being rebased (or empty when rebasing the current branch).
-#
-# This sample shows how to prevent topic branches that are already
-# merged to 'next' branch from getting rebased, because allowing it
-# would result in rebasing already published history.
-
-publish=next
-basebranch="$1"
-if test "$#" = 2
-then
-	topic="refs/heads/$2"
-else
-	topic=`git symbolic-ref HEAD` ||
-	exit 0 ;# we do not interrupt rebasing detached HEAD
-fi
-
-case "$topic" in
-refs/heads/??/*)
-	;;
-*)
-	exit 0 ;# we do not interrupt others.
-	;;
-esac
-
-# Now we are dealing with a topic branch being rebased
-# on top of master.  Is it OK to rebase it?
-
-# Does the topic really exist?
-git show-ref -q "$topic" || {
-	echo >&2 "No such branch $topic"
-	exit 1
-}
-
-# Is topic fully merged to master?
-not_in_master=`git rev-list --pretty=oneline ^master "$topic"`
-if test -z "$not_in_master"
-then
-	echo >&2 "$topic is fully merged to master; better remove it."
-	exit 1 ;# we could allow it, but there is no point.
-fi
-
-# Is topic ever merged to next?  If so you should not be rebasing it.
-only_next_1=`git rev-list ^master "^$topic" ${publish} | sort`
-only_next_2=`git rev-list ^master           ${publish} | sort`
-if test "$only_next_1" = "$only_next_2"
-then
-	not_in_topic=`git rev-list "^$topic" master`
-	if test -z "$not_in_topic"
-	then
-		echo >&2 "$topic is already up to date with master"
-		exit 1 ;# we could allow it, but there is no point.
-	else
-		exit 0
-	fi
-else
-	not_in_next=`git rev-list --pretty=oneline ^${publish} "$topic"`
-	/usr/bin/perl -e '
-		my $topic = $ARGV[0];
-		my $msg = "* $topic has commits already merged to public branch:\n";
-		my (%not_in_next) = map {
-			/^([0-9a-f]+) /;
-			($1 => 1);
-		} split(/\n/, $ARGV[1]);
-		for my $elem (map {
-				/^([0-9a-f]+) (.*)$/;
-				[$1 => $2];
-			} split(/\n/, $ARGV[2])) {
-			if (!exists $not_in_next{$elem->[0]}) {
-				if ($msg) {
-					print STDERR $msg;
-					undef $msg;
-				}
-				print STDERR " $elem->[1]\n";
-			}
-		}
-	' "$topic" "$not_in_next" "$not_in_master"
-	exit 1
-fi
-
-<<\DOC_END
-
-This sample hook safeguards topic branches that have been
-published from being rewound.
-
-The workflow assumed here is:
-
- * Once a topic branch forks from "master", "master" is never
-   merged into it again (either directly or indirectly).
-
- * Once a topic branch is fully cooked and merged into "master",
-   it is deleted.  If you need to build on top of it to correct
-   earlier mistakes, a new topic branch is created by forking at
-   the tip of the "master".  This is not strictly necessary, but
-   it makes it easier to keep your history simple.
-
- * Whenever you need to test or publish your changes to topic
-   branches, merge them into "next" branch.
-
-The script, being an example, hardcodes the publish branch name
-to be "next", but it is trivial to make it configurable via
-$GIT_DIR/config mechanism.
-
-With this workflow, you would want to know:
-
-(1) ... if a topic branch has ever been merged to "next".  Young
-    topic branches can have stupid mistakes you would rather
-    clean up before publishing, and things that have not been
-    merged into other branches can be easily rebased without
-    affecting other people.  But once it is published, you would
-    not want to rewind it.
-
-(2) ... if a topic branch has been fully merged to "master".
-    Then you can delete it.  More importantly, you should not
-    build on top of it -- other people may already want to
-    change things related to the topic as patches against your
-    "master", so if you need further changes, it is better to
-    fork the topic (perhaps with the same name) afresh from the
-    tip of "master".
-
-Let's look at this example:
-
-		   o---o---o---o---o---o---o---o---o---o "next"
-		  /       /           /           /
-		 /   a---a---b A     /           /
-		/   /               /           /
-	       /   /   c---c---c---c B         /
-	      /   /   /             \         /
-	     /   /   /   b---b C     \       /
-	    /   /   /   /             \     /
-    ---o---o---o---o---o---o---o---o---o---o---o "master"
-
-
-A, B and C are topic branches.
-
- * A has one fix since it was merged up to "next".
-
- * B has finished.  It has been fully merged up to "master" and "next",
-   and is ready to be deleted.
-
- * C has not merged to "next" at all.
-
-We would want to allow C to be rebased, refuse A, and encourage
-B to be deleted.
-
-To compute (1):
-
-	git rev-list ^master ^topic next
-	git rev-list ^master        next
-
-	if these match, topic has not merged in next at all.
-
-To compute (2):
-
-	git rev-list master..topic
-
-	if this is empty, it is fully merged to "master".
-
-DOC_END
-
-=== ./.git/hooks/pre-receive.sample ===
-
-
-#!/bin/sh
-#
-# An example hook script to make use of push options.
-# The example simply echoes all push options that start with 'echoback='
-# and rejects all pushes when the "reject" push option is used.
-#
-# To enable this hook, rename this file to "pre-receive".
-
-if test -n "$GIT_PUSH_OPTION_COUNT"
-then
-	i=0
-	while test "$i" -lt "$GIT_PUSH_OPTION_COUNT"
-	do
-		eval "value=\$GIT_PUSH_OPTION_$i"
-		case "$value" in
-		echoback=*)
-			echo "echo from the pre-receive-hook: ${value#*=}" >&2
-			;;
-		reject)
-			exit 1
-		esac
-		i=$((i + 1))
-	done
-fi
-
-=== ./.git/hooks/pre-merge-commit.sample ===
-
-
-#!/bin/sh
-#
-# An example hook script to verify what is about to be committed.
-# Called by "git merge" with no arguments.  The hook should
-# exit with non-zero status after issuing an appropriate message to
-# stderr if it wants to stop the merge commit.
-#
-# To enable this hook, rename this file to "pre-merge-commit".
-
-. git-sh-setup
-test -x "$GIT_DIR/hooks/pre-commit" &&
-        exec "$GIT_DIR/hooks/pre-commit"
-:
-
-=== ./.git/hooks/applypatch-msg.sample ===
-
-
-#!/bin/sh
-#
-# An example hook script to check the commit log message taken by
-# applypatch from an e-mail message.
-#
-# The hook should exit with non-zero status after issuing an
-# appropriate message if it wants to stop the commit.  The hook is
-# allowed to edit the commit message file.
-#
-# To enable this hook, rename this file to "applypatch-msg".
-
-. git-sh-setup
-commitmsg="$(git rev-parse --git-path hooks/commit-msg)"
-test -x "$commitmsg" && exec "$commitmsg" ${1+"$@"}
-:
-
-=== ./.git/hooks/pre-commit.sample ===
-
-
-#!/bin/sh
-#
-# An example hook script to verify what is about to be committed.
-# Called by "git commit" with no arguments.  The hook should
-# exit with non-zero status after issuing an appropriate message if
-# it wants to stop the commit.
-#
-# To enable this hook, rename this file to "pre-commit".
-
-if git rev-parse --verify HEAD >/dev/null 2>&1
-then
-	against=HEAD
-else
-	# Initial commit: diff against an empty tree object
-	against=$(git hash-object -t tree /dev/null)
-fi
-
-# If you want to allow non-ASCII filenames set this variable to true.
-allownonascii=$(git config --type=bool hooks.allownonascii)
-
-# Redirect output to stderr.
-exec 1>&2
-
-# Cross platform projects tend to avoid non-ASCII filenames; prevent
-# them from being added to the repository. We exploit the fact that the
-# printable range starts at the space character and ends with tilde.
-if [ "$allownonascii" != "true" ] &&
-	# Note that the use of brackets around a tr range is ok here, (it's
-	# even required, for portability to Solaris 10's /usr/bin/tr), since
-	# the square bracket bytes happen to fall in the designated range.
-	test $(git diff-index --cached --name-only --diff-filter=A -z $against |
-	  LC_ALL=C tr -d '[ -~]\0' | wc -c) != 0
-then
-	cat <<\EOF
-Error: Attempt to add a non-ASCII file name.
-
-This can cause problems if you want to work with people on other platforms.
-
-To be portable it is advisable to rename the file.
-
-If you know what you are doing you can disable this check using:
-
-  git config hooks.allownonascii true
-EOF
-	exit 1
-fi
-
-# If there are whitespace errors, print the offending file names and fail.
-exec git diff-index --check --cached $against --
-
-=== ./.git/hooks/pre-push.sample ===
-
-
-#!/bin/sh
-
-# An example hook script to verify what is about to be pushed.  Called by "git
-# push" after it has checked the remote status, but before anything has been
-# pushed.  If this script exits with a non-zero status nothing will be pushed.
-#
-# This hook is called with the following parameters:
-#
-# $1 -- Name of the remote to which the push is being done
-# $2 -- URL to which the push is being done
-#
-# If pushing without using a named remote those arguments will be equal.
-#
-# Information about the commits which are being pushed is supplied as lines to
-# the standard input in the form:
-#
-#   <local ref> <local oid> <remote ref> <remote oid>
-#
-# This sample shows how to prevent push of commits where the log message starts
-# with "WIP" (work in progress).
-
-remote="$1"
-url="$2"
-
-zero=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
-
-while read local_ref local_oid remote_ref remote_oid
-do
-	if test "$local_oid" = "$zero"
-	then
-		# Handle delete
-		:
-	else
-		if test "$remote_oid" = "$zero"
-		then
-			# New branch, examine all commits
-			range="$local_oid"
-		else
-			# Update to existing branch, examine new commits
-			range="$remote_oid..$local_oid"
-		fi
-
-		# Check for WIP commit
-		commit=$(git rev-list -n 1 --grep '^WIP' "$range")
-		if test -n "$commit"
-		then
-			echo >&2 "Found WIP commit in $local_ref, not pushing"
-			exit 1
-		fi
-	fi
-done
-
-exit 0
-
-=== ./.git/hooks/update.sample ===
-
-
-#!/bin/sh
-#
-# An example hook script to block unannotated tags from entering.
-# Called by "git receive-pack" with arguments: refname sha1-old sha1-new
-#
-# To enable this hook, rename this file to "update".
-#
-# Config
-# ------
-# hooks.allowunannotated
-#   This boolean sets whether unannotated tags will be allowed into the
-#   repository.  By default they won't be.
-# hooks.allowdeletetag
-#   This boolean sets whether deleting tags will be allowed in the
-#   repository.  By default they won't be.
-# hooks.allowmodifytag
-#   This boolean sets whether a tag may be modified after creation. By default
-#   it won't be.
-# hooks.allowdeletebranch
-#   This boolean sets whether deleting branches will be allowed in the
-#   repository.  By default they won't be.
-# hooks.denycreatebranch
-#   This boolean sets whether remotely creating branches will be denied
-#   in the repository.  By default this is allowed.
-#
-
-# --- Command line
-refname="$1"
-oldrev="$2"
-newrev="$3"
-
-# --- Safety check
-if [ -z "$GIT_DIR" ]; then
-	echo "Don't run this script from the command line." >&2
-	echo " (if you want, you could supply GIT_DIR then run" >&2
-	echo "  $0 <ref> <oldrev> <newrev>)" >&2
-	exit 1
-fi
-
-if [ -z "$refname" -o -z "$oldrev" -o -z "$newrev" ]; then
-	echo "usage: $0 <ref> <oldrev> <newrev>" >&2
-	exit 1
-fi
-
-# --- Config
-allowunannotated=$(git config --type=bool hooks.allowunannotated)
-allowdeletebranch=$(git config --type=bool hooks.allowdeletebranch)
-denycreatebranch=$(git config --type=bool hooks.denycreatebranch)
-allowdeletetag=$(git config --type=bool hooks.allowdeletetag)
-allowmodifytag=$(git config --type=bool hooks.allowmodifytag)
-
-# check for no description
-projectdesc=$(sed -e '1q' "$GIT_DIR/description")
-case "$projectdesc" in
-"Unnamed repository"* | "")
-	echo "*** Project description file hasn't been set" >&2
-	exit 1
-	;;
-esac
-
-# --- Check types
-# if $newrev is 0000...0000, it's a commit to delete a ref.
-zero=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
-if [ "$newrev" = "$zero" ]; then
-	newrev_type=delete
-else
-	newrev_type=$(git cat-file -t $newrev)
-fi
-
-case "$refname","$newrev_type" in
-	refs/tags/*,commit)
-		# un-annotated tag
-		short_refname=${refname##refs/tags/}
-		if [ "$allowunannotated" != "true" ]; then
-			echo "*** The un-annotated tag, $short_refname, is not allowed in this repository" >&2
-			echo "*** Use 'git tag [ -a | -s ]' for tags you want to propagate." >&2
-			exit 1
-		fi
-		;;
-	refs/tags/*,delete)
-		# delete tag
-		if [ "$allowdeletetag" != "true" ]; then
-			echo "*** Deleting a tag is not allowed in this repository" >&2
-			exit 1
-		fi
-		;;
-	refs/tags/*,tag)
-		# annotated tag
-		if [ "$allowmodifytag" != "true" ] && git rev-parse $refname > /dev/null 2>&1
-		then
-			echo "*** Tag '$refname' already exists." >&2
-			echo "*** Modifying a tag is not allowed in this repository." >&2
-			exit 1
-		fi
-		;;
-	refs/heads/*,commit)
-		# branch
-		if [ "$oldrev" = "$zero" -a "$denycreatebranch" = "true" ]; then
-			echo "*** Creating a branch is not allowed in this repository" >&2
-			exit 1
-		fi
-		;;
-	refs/heads/*,delete)
-		# delete branch
-		if [ "$allowdeletebranch" != "true" ]; then
-			echo "*** Deleting a branch is not allowed in this repository" >&2
-			exit 1
-		fi
-		;;
-	refs/remotes/*,commit)
-		# tracking branch
-		;;
-	refs/remotes/*,delete)
-		# delete tracking branch
-		if [ "$allowdeletebranch" != "true" ]; then
-			echo "*** Deleting a tracking branch is not allowed in this repository" >&2
-			exit 1
-		fi
-		;;
-	*)
-		# Anything else (is there anything else?)
-		echo "*** Update hook: unknown type of update to ref $refname of type $newrev_type" >&2
-		exit 1
-		;;
-esac
-
-# --- Finished
-exit 0
-
-=== ./.git/hooks/sendemail-validate.sample ===
-
-
-#!/bin/sh
-
-# An example hook script to validate a patch (and/or patch series) before
-# sending it via email.
-#
-# The hook should exit with non-zero status after issuing an appropriate
-# message if it wants to prevent the email(s) from being sent.
-#
-# To enable this hook, rename this file to "sendemail-validate".
-#
-# By default, it will only check that the patch(es) can be applied on top of
-# the default upstream branch without conflicts in a secondary worktree. After
-# validation (successful or not) of the last patch of a series, the worktree
-# will be deleted.
-#
-# The following config variables can be set to change the default remote and
-# remote ref that are used to apply the patches against:
-#
-#   sendemail.validateRemote (default: origin)
-#   sendemail.validateRemoteRef (default: HEAD)
-#
-# Replace the TODO placeholders with appropriate checks according to your
-# needs.
-
-validate_cover_letter () {
-	file="$1"
-	# TODO: Replace with appropriate checks (e.g. spell checking).
-	true
-}
-
-validate_patch () {
-	file="$1"
-	# Ensure that the patch applies without conflicts.
-	git am -3 "$file" || return
-	# TODO: Replace with appropriate checks for this patch
-	# (e.g. checkpatch.pl).
-	true
-}
-
-validate_series () {
-	# TODO: Replace with appropriate checks for the whole series
-	# (e.g. quick build, coding style checks, etc.).
-	true
-}
-
-# main -------------------------------------------------------------------------
-
-if test "$GIT_SENDEMAIL_FILE_COUNTER" = 1
-then
-	remote=$(git config --default origin --get sendemail.validateRemote) &&
-	ref=$(git config --default HEAD --get sendemail.validateRemoteRef) &&
-	worktree=$(mktemp --tmpdir -d sendemail-validate.XXXXXXX) &&
-	git worktree add -fd --checkout "$worktree" "refs/remotes/$remote/$ref" &&
-	git config --replace-all sendemail.validateWorktree "$worktree"
-else
-	worktree=$(git config --get sendemail.validateWorktree)
-fi || {
-	echo "sendemail-validate: error: failed to prepare worktree" >&2
-	exit 1
-}
-
-unset GIT_DIR GIT_WORK_TREE
-cd "$worktree" &&
-
-if grep -q "^diff --git " "$1"
-then
-	validate_patch "$1"
-else
-	validate_cover_letter "$1"
-fi &&
-
-if test "$GIT_SENDEMAIL_FILE_COUNTER" = "$GIT_SENDEMAIL_FILE_TOTAL"
-then
-	git config --unset-all sendemail.validateWorktree &&
-	trap 'git worktree remove -ff "$worktree"' EXIT &&
-	validate_series
-fi
-
-=== ./.git/hooks/push-to-checkout.sample ===
-
-
-#!/bin/sh
-
-# An example hook script to update a checked-out tree on a git push.
-#
-# This hook is invoked by git-receive-pack(1) when it reacts to git
-# push and updates reference(s) in its repository, and when the push
-# tries to update the branch that is currently checked out and the
-# receive.denyCurrentBranch configuration variable is set to
-# updateInstead.
-#
-# By default, such a push is refused if the working tree and the index
-# of the remote repository has any difference from the currently
-# checked out commit; when both the working tree and the index match
-# the current commit, they are updated to match the newly pushed tip
-# of the branch. This hook is to be used to override the default
-# behaviour; however the code below reimplements the default behaviour
-# as a starting point for convenient modification.
-#
-# The hook receives the commit with which the tip of the current
-# branch is going to be updated:
-commit=$1
-
-# It can exit with a non-zero status to refuse the push (when it does
-# so, it must not modify the index or the working tree).
-die () {
-	echo >&2 "$*"
-	exit 1
-}
-
-# Or it can make any necessary changes to the working tree and to the
-# index to bring them to the desired state when the tip of the current
-# branch is updated to the new commit, and exit with a zero status.
-#
-# For example, the hook can simply run git read-tree -u -m HEAD "$1"
-# in order to emulate git fetch that is run in the reverse direction
-# with git push, as the two-tree form of git read-tree -u -m is
-# essentially the same as git switch or git checkout that switches
-# branches while keeping the local changes in the working tree that do
-# not interfere with the difference between the branches.
-
-# The below is a more-or-less exact translation to shell of the C code
-# for the default behaviour for git's push-to-checkout hook defined in
-# the push_to_deploy() function in builtin/receive-pack.c.
-#
-# Note that the hook will be executed from the repository directory,
-# not from the working tree, so if you want to perform operations on
-# the working tree, you will have to adapt your code accordingly, e.g.
-# by adding "cd .." or using relative paths.
-
-if ! git update-index -q --ignore-submodules --refresh
-then
-	die "Up-to-date check failed"
-fi
-
-if ! git diff-files --quiet --ignore-submodules --
-then
-	die "Working directory has unstaged changes"
-fi
-
-# This is a rough translation of:
-#
-#   head_has_history() ? "HEAD" : EMPTY_TREE_SHA1_HEX
-if git cat-file -e HEAD 2>/dev/null
-then
-	head=HEAD
-else
-	head=$(git hash-object -t tree --stdin </dev/null)
-fi
-
-if ! git diff-index --quiet --cached --ignore-submodules $head --
-then
-	die "Working directory has staged changes"
-fi
-
-if ! git read-tree -u -m "$commit"
-then
-	die "Could not update working tree to new HEAD"
-fi
-
-=== ./.git/hooks/prepare-commit-msg.sample ===
-
-
-#!/bin/sh
-#
-# An example hook script to prepare the commit log message.
-# Called by "git commit" with the name of the file that has the
-# commit message, followed by the description of the commit
-# message's source.  The hook's purpose is to edit the commit
-# message file.  If the hook fails with a non-zero status,
-# the commit is aborted.
-#
-# To enable this hook, rename this file to "prepare-commit-msg".
-
-# This hook includes three examples. The first one removes the
-# "# Please enter the commit message..." help message.
-#
-# The second includes the output of "git diff --name-status -r"
-# into the message, just before the "git status" output.  It is
-# commented because it doesn't cope with --amend or with squashed
-# commits.
-#
-# The third example adds a Signed-off-by line to the message, that can
-# still be edited.  This is rarely a good idea.
-
-COMMIT_MSG_FILE=$1
-COMMIT_SOURCE=$2
-SHA1=$3
-
-/usr/bin/perl -i.bak -ne 'print unless(m/^. Please enter the commit message/..m/^#$/)' "$COMMIT_MSG_FILE"
-
-# case "$COMMIT_SOURCE,$SHA1" in
-#  ,|template,)
-#    /usr/bin/perl -i.bak -pe '
-#       print "\n" . `git diff --cached --name-status -r`
-# 	 if /^#/ && $first++ == 0' "$COMMIT_MSG_FILE" ;;
-#  *) ;;
-# esac
-
-# SOB=$(git var GIT_COMMITTER_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
-# git interpret-trailers --in-place --trailer "$SOB" "$COMMIT_MSG_FILE"
-# if test -z "$COMMIT_SOURCE"
-# then
-#   /usr/bin/perl -i.bak -pe 'print "\n" if !$first_line++' "$COMMIT_MSG_FILE"
-# fi
-
-=== ./.git/hooks/pre-applypatch.sample ===
-
-
-#!/bin/sh
-#
-# An example hook script to verify what is about to be committed
-# by applypatch from an e-mail message.
-#
-# The hook should exit with non-zero status after issuing an
-# appropriate message if it wants to stop the commit.
-#
-# To enable this hook, rename this file to "pre-applypatch".
-
-. git-sh-setup
-precommit="$(git rev-parse --git-path hooks/pre-commit)"
-test -x "$precommit" && exec "$precommit" ${1+"$@"}
-:
-
-=== ./.git/hooks/post-update.sample ===
-
-
-#!/bin/sh
-#
-# An example hook script to prepare a packed repository for use over
-# dumb transports.
-#
-# To enable this hook, rename this file to "post-update".
-
-exec git update-server-info
-
-=== ./.git/info/exclude ===
-
-
-# git ls-files --others --exclude-from=.git/info/exclude
-# Lines that start with '#' are comments.
-# For a project mostly in C, the following would be a good set of
-# exclude patterns (uncomment them if you want to use them):
-# *.[oa]
-# *~
-
-=== ./.git/description ===
-
-
-Unnamed repository; edit this file 'description' to name the repository.
-
-=== ./Makefile ===
-
-
-all: up
-
-
-up:
-	# will add the sgouzi.42.fr to /etc/hosts
-	./srcs/requirements/tools/add-host.sh
-	cd srcs && docker compose build --pull
-	cd srcs && docker compose up
-
-
-down:
-	cd srcs && docker compose down
-
-down_bad:
-	cd srcs && docker compose down --volumes
-	cd srcs && docker image rm -f nginx
-	cd srcs && docker image rm -f wordpress
-	cd srcs && docker image rm -f mariadb
-	sudo rm -rf /home/$(USER)/data/mariadb/*
-	sudo rm -rf /home/$(USER)/data/wordpress/*
-
-
-re:
-	cd srcs && docker compose down && docker compose up
-
-hard_reset: down_bad up
-	echo "Hard reset done ..."
-=== ./output ===
-
-
-
