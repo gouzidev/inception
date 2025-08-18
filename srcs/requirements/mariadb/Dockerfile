@@ -1,24 +1,24 @@
-from alpine:3.21
+FROM alpine:3.21.4
 
 
 # tools first (alpine is minimal)
-run apk add --no-cache wget tar  curl zsh 
+RUN apk add --no-cache wget tar  curl zsh 
 
 # download mariadb
-run apk add mariadb mariadb-client
+RUN apk add mariadb mariadb-client
 
 # prepare needed folders for maria
-run mkdir -p /var/lib/mysql /run/mysqld
+RUN mkdir -p /var/lib/mysql /run/mysqld
 
-run chown -R mysql:mysql /var/lib/mysql /run/mysqld
-
-
-
-# copy config file
-copy conf/db.cnf /etc/my.cnf
+RUN chown -R mysql:mysql /var/lib/mysql /run/mysqld
 
 
-# copy init script file
-copy tools/init.sh /usr/local/bin
 
-entrypoint ["/usr/local/bin/init.sh"]
+# COPY config file
+COPY conf/db.cnf /etc/my.cnf
+
+
+# COPY init script file
+COPY tools/init.sh /usr/local/bin
+
+ENTRYPOINT ["/usr/local/bin/init.sh"]

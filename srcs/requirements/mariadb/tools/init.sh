@@ -21,7 +21,7 @@ chown -R mysql:mysql /var/lib/mysql /run/mysqld
 
 # Check if this is the first run
 if [ ! -d "$DATADIR/mysql" ]; then
-    echo "🏗️ MariaDB: First run detected, initializing database..."
+    echo "🏗️ MariaDB: First RUN detected, initializing database..."
     
     # Initialize the database system
     # This creates the mysql, performance_schema, etc. databases
@@ -54,7 +54,7 @@ if [ ! -d "$DATADIR/mysql" ]; then
     
     echo "📝 MariaDB: Running initialization SQL..."
     
-    # Run SQL commands to set up database
+    #setup db
     mysql --socket="$SOCKET" <<-EOF
 -- Set root password
 ALTER USER 'root'@'localhost' IDENTIFIED BY '$MARIADB_ADMIN_PASSWORD';
@@ -85,7 +85,7 @@ else
     echo "📂 MariaDB: Database already exists, skipping initialization"
 fi
 
-echo "🚀 MariaDB: Starting production server..."
+echo  "starting mariadb..."
 
-# Start the actual MariaDB server (replaces this process)
+# start maria process, replaces curr shell
 exec mysqld --user=mysql --datadir="$DATADIR" --socket="$SOCKET" --bind-address="0.0.0.0"

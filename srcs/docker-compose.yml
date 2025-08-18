@@ -1,10 +1,13 @@
 services:
+
     wordpress:
         build: ./requirements/wordpress
+        image: wordpress
         env_file:
+            - ".env"
             - "./requirements/wordpress/conf/.env"
         volumes:
-            - /home/sgouzi/data:/var/data/www
+            - wordpress:/var/data/www
         networks:
             - docker-network
         dns:
@@ -18,22 +21,28 @@ services:
 
     nginx:
         build: ./requirements/nginx
+        image: nginx
         volumes:
-            - /home/sgouzi/data:/var/data/www
+            - wordpress:/var/data/www
         networks:
             - docker-network
         ports:
             - 443:443
         restart: always
+        env_file:
+            - ".env"
+            - "./requirements/mariadb/conf/.env"
 
 
     mariadb:
         build: ./requirements/mariadb
+        image: mariadb
         volumes:
-            - /home/sgouzi/data/mariadb:/var/lib/mysql
+            - mariadb:/var/lib/mysql
         expose:
             - 3306
         env_file:
+            - ".env"
             - "./requirements/mariadb/conf/.env"
         networks:
             - docker-network
@@ -44,5 +53,17 @@ services:
 
 networks:
     docker-network: {}
+
 volumes:
-    wordpress-data: {}
+    wordpress:
+        driver: local
+        driver_opts:
+            type: none
+            device: /home/sgouzi/data/wordpress
+            o: bind
+    mariadb:
+        driver: local
+        driver_opts:
+            type: none
+            device: /home/sgouzi/data/mariadb
+            o: bind
