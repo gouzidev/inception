@@ -14,8 +14,11 @@ down_bad:
 	cd srcs && docker image rm -f nginx
 	cd srcs && docker image rm -f wordpress
 	cd srcs && docker image rm -f mariadb
-	sudo rm -rf /home/$(USER)/data/mariadb/*
-	sudo rm -rf /home/$(USER)/data/wordpress/*
+	sudo rm -rf /home/$(USER)/data/mariadb/
+	sudo rm -rf /home/$(USER)/data/wordpress/
+	mkdir -p /home/sgouzi/data/mariadb /home/sgouzi/data/wordpress
+	docker image prune 
+	docker container prune 
 
 
 re:

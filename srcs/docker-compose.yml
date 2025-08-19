@@ -5,7 +5,6 @@ services:
         image: wordpress
         env_file:
             - ".env"
-            - "./requirements/wordpress/conf/.env"
         volumes:
             - wordpress:/var/data/www
         networks:
@@ -29,10 +28,6 @@ services:
         ports:
             - 443:443
         restart: always
-        env_file:
-            - ".env"
-            - "./requirements/mariadb/conf/.env"
-
 
     mariadb:
         build: ./requirements/mariadb
@@ -43,7 +38,6 @@ services:
             - 3306
         env_file:
             - ".env"
-            - "./requirements/mariadb/conf/.env"
         networks:
             - docker-network
         restart: always

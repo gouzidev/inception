@@ -1,9 +1,9 @@
 #!/bin/sh
 # tools/init.sh
 
-set -e  # Exit if any command fails
+set -e  # exit if any command fails
 
-# Get environment variables (with defaults)
+# get environment variables (with defaults)
 MARIADB_ADMIN_PASSWORD="${MARIADB_ADMIN_PASSWORD}"
 MARIADB_DATABASE="${MARIADB_DATABASE}"
 
@@ -13,48 +13,48 @@ MARIADB_USER_PASSWORD="${MARIADB_USER_PASSWORD}"
 DATADIR="/var/lib/mysql"
 SOCKET="/run/mysqld/mysqld.sock"
 
-echo "🔧 MariaDB: Starting initialization..."
+echo "mariadb: Starting initialization..."
 
 
-# Ensure proper ownership
+# fixing ownership
 chown -R mysql:mysql /var/lib/mysql /run/mysqld
 
-# Check if this is the first run
+# if first time, run this
 if [ ! -d "$DATADIR/mysql" ]; then
-    echo "🏗️ MariaDB: First RUN detected, initializing database..."
+    echo "mariadb first run, initializing database..."
     
-    # Initialize the database system
-    # This creates the mysql, performance_schema, etc. databases
+    # init the database system
+    # create the mysql, performance_schema, etc. databases
     mariadb-install-db \
         --user=mysql \
         --datadir="$DATADIR" \
         --skip-test-db
     
-    echo "🚀 MariaDB: Starting temporary server for setup..."
+    echo "mariadb temporary server for setup starting..."
     
-    # Start MariaDB temporarily (socket only, no network)
+    # start mariadb temporarily (socket only, no network)
     mysqld --user=mysql --datadir="$DATADIR" --socket="$SOCKET" --skip-networking &
     TEMP_PID=$!
     
-    # Wait for MariaDB to be ready
-    echo "⏳ MariaDB: Waiting for server to be ready..."
+    # wait for mariadb to be ready, max of 30sec
+    echo "mariadb waiting for server to be ready..."
     for i in $(seq 1 30); do
         if mysqladmin --socket="$SOCKET" ping >/dev/null 2>&1; then
-            echo "✅ MariaDB: Server is ready!"
+            echo "mariadb server is ready"
             break
         fi
         sleep 1
     done
     
-    # Check if server actually started
+    # check if server actually started
     if ! mysqladmin --socket="$SOCKET" ping >/dev/null 2>&1; then
-        echo "❌ MariaDB: Failed to start temporary server"
+            echo "mariadb server failed"
         exit 1
     fi
     
-    echo "📝 MariaDB: Running initialization SQL..."
+    echo "mariadb running initializing SQL..."
     
-    #setup db
+    # setup db
     mysql --socket="$SOCKET" <<-EOF
 -- Set root password
 ALTER USER 'root'@'localhost' IDENTIFIED BY '$MARIADB_ADMIN_PASSWORD';
@@ -74,15 +74,13 @@ GRANT ALL PRIVILEGES ON \`$MARIADB_DATABASE\`.* TO '$MARIADB_USER_USERNAME'@'%';
 -- Apply changes
 FLUSH PRIVILEGES;
 EOF
-
-
-    echo "🛑 MariaDB: Shutting down temporary server..."
+    echo "mariadb shutting down temporary server..."
     mysqladmin --socket="$SOCKET" --password="$MARIADB_ADMIN_PASSWORD" shutdown
     wait $TEMP_PID
     
-    echo "✅ MariaDB: Initialization complete!"
+    echo "mariadb initialization complete..."
 else
-    echo "📂 MariaDB: Database already exists, skipping initialization"
+    echo "mariadb database already exists, skipping initialization"
 fi
 
 echo  "starting mariadb..."
