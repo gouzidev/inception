@@ -1,24 +1,31 @@
-all:
-	cd srcs && sudo docker compose up --build
-up : all
+all: up
 
-setup:
-	sudo rm -f /etc/apt/sources.list.d/*docker*.list
-	sudo apt clean
-	sudo apt update -y
-	sudo apt install curl -y
-	sudo apt install software-properties-common apt-transport-https ca-certificates -y
-	curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-	echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu oracular stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-	sudo apt update -y
-	sudo apt install docker-ce docker-ce-cli containerd.io uidmap -y
 
-down: clean
+up:
+	docker compose -f srcs/docker-compose.yml build --pull
+	docker compose -f srcs/docker-compose.yml up
+	mkdir -p /home/sgouzi/data/mariadb /home/sgouzi/data/wordpress
 
-clean:
-	cd srcs && sudo docker compose down
 
-fclean:
-	cd srcs && sudo docker compose down && sudo docker system prune -f
+down:
+	docker compose -f srcs/docker-compose.yml down
 
-re: clean all
+down_bad: down
+	docker image rm -f nginx
+	docker image rm -f wordpress
+	docker image rm -f mariadb
+
+	sudo rm -rf /home/$(USER)/data/mariadb/
+	sudo rm -rf /home/$(USER)/data/wordpress/
+	mkdir -p /home/sgouzi/data/mariadb /home/sgouzi/data/wordpress
+	
+	docker image prune --force
+	docker container prune --force
+	docker volume prune --force
+
+
+re:
+	docker compose -f srcs/docker-compose.yml down && docker compose -f srcs/docker-compose.yml up
+
+hard_reset: down_bad up
+	echo "Hard reset done ..."
