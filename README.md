@@ -2,8 +2,8 @@
 
 A 42 project deploying a multi-container stack with Docker: Nginx, WordPress (PHP-FPM), and MariaDB.
 
-![Architecture Overview](docs/imgs/inception.webp)
-![CGI Overview](docs/imgs/cgi.png)
+![Architecture Overview](imgs/inception.webp)
+![CGI Overview](imgs/cgi.png)
 
 ## Table of Contents
 - Overview
