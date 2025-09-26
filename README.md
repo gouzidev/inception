@@ -76,12 +76,6 @@ inception
 │   │           └── setup.sh
 ```
 
-## Screenshots
-- Architecture
-  ![Architecture Overview](docs/imgs/inception.webp)
-- CGI
-  ![CGI Overview](docs/imgs/cgi.png)
-
 ## Troubleshooting
 - Rebuild from scratch:
   ```bash
